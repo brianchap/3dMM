@@ -1,17 +1,17 @@
-#https://github.com/Twinklebear/tray_rust
+#https://github.com/Twinklebear/tray_rust/blob/master/src/bxdf/torrance_sparrow.rs
 
 import numpy as np
 
 # TODO: Additional parameters that need fixing
 
-# width of beckmann microfacet distribution
-beck_width = 0.000001
+# width of beckmann microfacet distribution (roughness param from Donner 2006 paper)
+beck_width = 0.35
 
-# Refractive index of the material the light is coming from
-eta_i = 0.5
+# Refractive index of the material the light is coming from (air most likely)
+eta_i = 1
 
-# Refractive index of the material the light is hitting/entering
-eta_t = 0.5
+# Refractive index of the material the light is hitting/entering (epidermis most likely)
+eta_t = 1.45
 
 # Microfacet distribution function
 def distr(w_h):
@@ -51,9 +51,17 @@ def dielectric(ci, ct, ei, et):
     r_perp = (ei * ci - et * ct)/(ei * ci + et * ct)
     return [0.5 * (r_par * r_par + r_perp * r_perp) for i in range(4)]
 
-    
-# Fresnel reflectance function for dielectrics (skin?)
+# Fresnel reflectance function. My own implementation using the fresnel equations (https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.pdf; eq. 22)
 def fres(cos_i):
+    cos_i = abs(cos_i)
+    g = sqrt((eta_t**2)/(eta_i**2) - 1 + cos_i**2)
+    first_term = 0.5 * ((g - c)**2)/((g + c)**2)
+    second_term = 1 + (((c * (g + c) - 1)**2)/((c * (g - c) + 1)**2))
+
+    return first_term * second_term
+    
+# Fresnel reflectance function for dielectrics (skin?) Implemented using the rust code from github
+def fres_rust(cos_i):
     if cos_i < -1:
         ci = -1
     elif cos_i > 1:
