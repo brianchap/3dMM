@@ -1,4 +1,7 @@
 # 3dMM
+
+**UPDATE 12/26: Please run 10_intensity_model.py in lieu of 9_intensity_model.py for the newest results.**
+
 Adapted from https://github.com/YadiraF/face3d. Please use proper Git etiquette.
 
 Minor modifications have been introduced to enable MATLAB data extraction from the AFLW2000-3D and 300W-3D datasets. The model generalizes poorly for darker skin tones, and a scaling of colors is recommended in MorphabelModel.py.
