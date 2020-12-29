@@ -1,0 +1,25 @@
+import numpy as np
+
+# Implementation of torrance-sparrow microfacet BRDF
+# Inputs:
+# p_s ... This value represents the oiliness of the skin- [0,1]
+# w_i, w_o ... These are 2 3d vectors that represent the incoming and outgoing lighting directions
+
+# Outputs:
+# Returns the torrance-sparrow brdf value
+
+def brdf(p_s, w_i, w_o):
+    cos_to = abs(w_o[2])
+    cos_ti = abs(w_i[2])
+
+    # TODO: implement edge cases for inputs
+    
+    w_h = w_i + w_o
+
+    # Normalize w_h
+    norm_wh = w_h / np.linalg.norm(w_h)
+
+    return p_s*fres()*geom()*distr()/(4*cos_to*cos_ti)
+
+def distr():
+    
