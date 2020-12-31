@@ -223,8 +223,6 @@ void _render_colors_core(
 
                             p_color = weight[0]*p0_color + weight[1]*p1_color + weight[2]*p2_color;
                             image[y*w*c + x*c + k] = p_color;
-			    label = to_string(p_color);
-                            putText(image, label, y*w*c + x*c + k, FONT_HERSHEY_PLAIN, 1.0, CV_RGB(0,255,0), 2.0);
                         }
 
                         depth_buffer[y*w + x] = p_depth;
