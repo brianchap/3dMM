@@ -145,7 +145,7 @@ with open('extinction_coeff.txt') as f:
        molarExtinctionCoeffOxy[int(lmbda)] = float(muoxy)
        molarExtinctionCoeffDoxy[int(lmbda)] = float(mudoxy)
 
-def transform_test(vertices, obj, camera, source, h = 256, w = 256):
+def transform_test(vertices, obj, camera, fblood, fmel, h = 256, w = 256):
 	'''
 	Args:
 		obj: dict contains obj transform paras
@@ -166,6 +166,9 @@ def transform_test(vertices, obj, camera, source, h = 256, w = 256):
 		## to image coords(position in image)
 		image_vertices = mesh.transform.to_image(projected_vertices, h, w, True)
 
+	nm_wavelength = 550
+	source = (125, 125, 125)
+	strength_val, angles, normals = compute_strength(nm_wavelength, fblood, fmel, image_vertices, triangles, source)
 	brdf_val = []
 	for index, value in enumerate(vertices):
 		brdf_val.append(brdf(0.1, vertices[index]-source, camera['eye']-vertices[index]))
@@ -184,9 +187,6 @@ def transform_test(vertices, obj, camera, source, h = 256, w = 256):
 
 	#CHANGE THE LINE BELOW THIS FROM NORMALS -> ANGLES OR STRENGTH_VAL AS APPROPRIATE
 	rendering = mesh.render.render_colors(image_vertices, triangles, strength_val, h, w, c=1)
-	#print(image_vertices.shape)
-	#print(triangles.shape)
-	#print(normals.shape)
 	rendering = np.concatenate((np.zeros((h, w, 1)), rendering), 2)
 	rendering = np.concatenate((np.zeros((h, w, 1)), rendering), 2)
 	#rendering = np.minimum((np.maximum(rendering, 0)), 1)
@@ -196,7 +196,6 @@ def transform_test(vertices, obj, camera, source, h = 256, w = 256):
 def normals_compute(vertices,triangles):
     eps = 1e-6
     no_v = vertices.shape[0] #-----number of vertices
-    #no_v = triangles.shape[0]
     normals = np.zeros([no_v,3])
 
     for count, i in enumerate(triangles):
@@ -209,35 +208,10 @@ def normals_compute(vertices,triangles):
     normals = normals/(np.linalg.norm(normals, ord=2, axis=-1, keepdims=True)+eps)
     return normals
 
-    #for i in np.arange(no_v):
-    #      for j in np.arange(3):
-    #         sub_array = triangles[:,j]
-    #         #print(sub_array.shape)
-    #         ixs = np.where(sub_array==i)[0]
-    #         #print(ixs)
-    #         in1 = (j+1)%3
-    #         in2 = (j+2)%3
-
-    #         v1 = vertices[triangles[ixs,in1],:]-vertices[triangles[ixs,j],:]
-    #         v2 = vertices[triangles[ixs,in2],:]-vertices[triangles[ixs,j],:]
-    #         #print(v1.shape,v2.shape)
-    #         n_temp = np.cross(v2,v1)
-    #         #n_temp = n_temp/(np.linalg.norm(n_temp, ord=2, axis=-1, keepdims=True)+eps)
-    #         #print(n_temp.shape)
-    #         n = np.sum(n_temp,axis=0)
-    #         #print(n.shape)
-    #         n = n/(np.linalg.norm(n,ord=2)+eps)
-    #         normals[i,:] = normals[i,:]+n
-    #normals = normals/(np.linalg.norm(normals, ord=2, axis=-1, keepdims=True)+eps)
-    #return normals
-
 def angles_compute(v1,v2):
     #v1 is an array of unit vectors
     #v2 is an array of corresponding unit vectors
     dot_product = np.sum(np.multiply(v1, v2),axis=1,keepdims=True)
-    #for index, value in enumerate(dot_product):
-    #	if dot_product[index] < 0:
-    #		dot_product[index] = dot_product[index] * -1
     angles = np.arccos(dot_product)
     return angles
 
@@ -247,7 +221,7 @@ def angles_compute(v1,v2):
 
 ##########-----------------computation functions---------------------##########
 def computebackScatteringCoefficient(lmbda):
-  mieScattering = 2 * pow(10,-5) * pow(lmbda,-1.5)
+  mieScattering = 2 * pow(10,5) * pow(lmbda,-1.5)
   rayleighScattering = 2 * pow(10,12) * pow(lmbda,-4)
   return mieScattering + rayleighScattering
 
@@ -266,9 +240,7 @@ def computeAbsorptionCoefficientBlood(lmbda):
 def computeAbsorptionCoefficientDermis(lmbda,fblood):
   mublood = computeAbsorptionCoefficientBlood(lmbda)
   muskin = computeAbsorptionCoefficientSkin(lmbda)
-  # print(mublood,muskin,lmbda,fblood)
   mudermis = [x * mublood + (1-x) * muskin for x in fblood]
-  # print(mudermis)
   return mudermis
 
 def computeK(lmbda,fblood):
@@ -341,18 +313,6 @@ def computeTotalReflectance(lmbda,fblood,fmel,d):
   dRdermis =  Rdermis
   return dRdermis
 
-# def computeR(lmbda,fblood,fmel,d):
-#   Tepidermis = computeTepidermis(lmbda,fmel)
-#   b = computeBeta(lmbda,fblood)
-#   K = computeK(lmbda,fblood)
-#   R = pow((1 - b),2) * (np.exp(K*d) - np.exp(-1*K*d))
-#
-#   R = R/(pow((1 + b),2) * np.exp(K*d) - pow((1 - b),2) * np.exp(-1*K*d))
-#
-#   dRdermis = computeTotalReflectance(lmbda,fblood,fmel,d)
-#
-#   return pow(dRdermis,2)/pow(R,2)
-
 def computeIntensity(lmbda,fblood,fmel,d):
   Tepidermis = computeTepidermis(lmbda,fmel)
   dRdermis = computeTotalReflectance(lmbda,fblood,fmel,d)
@@ -399,7 +359,6 @@ def compute_strength(lmbda,fblood,fmel,vertices,triangles,s,d=0.129126):
     #reshaping signal to nVert,1
     signal = np.reshape(signal,(-1,1))
     signal = signal/np.max(signal) #normalize to 0=1: if linear normalization doesnt enable good visualization, can also use dB scale
-    #signal = np.tile(signal,(1,3)) #covert to RGB so that signal strength is shown as shades of grey
     print('\n' + "Strength Values")
     print(np.percentile(signal, 10))
     print(np.percentile(signal, 30))
@@ -419,9 +378,6 @@ print('init bfm model success')
 mat_filename = 'Sample6.mat'
 mat_data = sio.loadmat(mat_filename)
 image_filename = 'Sample6.jpg'
-# with open(image_filename, 'rb') as file:
-#    img = Image.open(file)
-#    print('image size: {0}'.format(img.size))
 sp = mat_data['Shape_Para']
 ep = mat_data['Exp_Para']
 tp = mat_data['Tex_Para']
@@ -434,7 +390,6 @@ colors = bfm.generate_colors(tp)
 # --- 3. transform vertices to proper position
 pp = mat_data['Pose_Para']
 s = pp[0, 6]
-# angles = [np.rad2deg(pp[0, 0]), np.rad2deg(pp[0, 1]), np.rad2deg(pp[0, 2])]
 angles2 = pp[0, 0:3]
 t = pp[0, 3:6]
 
@@ -442,23 +397,15 @@ t = pp[0, 3:6]
 h = w = 450
 c = 3
 
-#s = 8e-04
-#angles2 = [10, 30, 20]
-#t = [0, 0, 0]
 transformed_vertices = bfm.transform(vertices, s, angles2, t)
 projected_vertices = transformed_vertices.copy()  # using stantard camera & orth projection
 # projected_vertices[:,1] = h - projected_vertices[:,1] - 1
+
 # --- 4. render(3d obj --> 2d image)
 image_vertices = mesh.transform.to_image(projected_vertices, h, w)
-
 vertices = image_vertices
+vertices = vertices - np.mean(vertices, 0)[np.newaxis, :]
 triangles = bfm.triangles
-
-#C = sio.loadmat('Data/example1.mat')
-#vertices = C['vertices']; 
-#global colors
-#global triangles
-#colors = C['colors']; triangles = C['triangles']
 colors = colors/np.max(colors)
 
 sRGBim = sRGB_generation()
@@ -481,41 +428,6 @@ for color in colors:
 	print(str(100*timer/len(colors)) + "% completed processing")
 	timer = timer + 1
 
-nm_wavelength = 550
-source = (400, 100, 50)
-strength_val, angles, normals = compute_strength(nm_wavelength, fblood, fmel, vertices, triangles, source)
-print('\n' + "Bounds Check")
-print(np.percentile(strength_val, 1))
-print(np.percentile(strength_val, 100))
-#print(np.mean(strength_val))
-#print(np.std(strength_val))
-#strength_val = strength_val - (np.mean(strength_val) - 2*np.std(strength_val))
-#strength_val = ((1/4) / np.std(strength_val)) * strength_val
-#strength_val = (strength_val - np.percentile(strength_val, 1))*1/(np.percentile(strength_val, 100) - np.percentile(strength_val, 1))
-#for index, sing_val in enumerate(strength_val):
-#	if strength_val[index] < 0:
-#		strength_val[index] = 0
-#	elif strength_val[index] > 1:
-#		strength_val[index] = 0.9999999999
-print("-----")
-#for index, sing_val in enumerate(strength_val):
-#	if strength_val[index] < np.percentile(strength_val, 20):
-#		strength_val[index] = 0
-#	elif strength_val[index] < np.percentile(strength_val, 40):
-#		strength_val[index] = 0.25
-#	elif strength_val[index] < np.percentile(strength_val, 60):
-#		strength_val[index] = 0.5
-#	elif strength_val[index] < np.percentile(strength_val, 80):
-#		strength_val[index] = 0.75
-#	else:
-#		strength_val[index] = 1
-#print(strength_val)
-#strength_val = np.log(strength_val) + 1
-#for index, sing_val in enumerate(strength_val):
-#	if strength_val[index] < 0:
-#		strength_val[index] = 0
-vertices = vertices - np.mean(vertices, 0)[np.newaxis, :]
-
 # save folder
 save_folder = 'results/intensity_distro'
 if not os.path.exists(save_folder):
@@ -537,7 +449,10 @@ for factor in np.arange(0.5, 1.2, 0.1):
 	obj['s'] = scale_init*factor
 	obj['angles'] = [0, 0, 0]
 	obj['t'] = [0, 0, 0]
-	image = transform_test(vertices, obj, camera, source) 
+	image = transform_test(vertices, obj, camera, fblood, fmel) 
+	image *= 255 # or any coefficient
+	image = image.astype(np.uint8)
+	image = cv2.rotate(image,cv2.ROTATE_180)
 	io.imsave('{}/1_1_{:.2f}.jpg'.format(save_folder, factor), image, quality=100)
 
 # angles
@@ -547,7 +462,10 @@ for i in range(3):
 		obj['angles'] = [0, 0, 0]
 		obj['angles'][i] = angle
 		obj['t'] = [0, 0, 0]
-		image = transform_test(vertices, obj, camera, source) 
+		image = transform_test(vertices, obj, camera, fblood, fmel) 
+		image *= 255 # or any coefficient
+		image = image.astype(np.uint8)
+		image = cv2.rotate(image,cv2.ROTATE_180)
 		io.imsave('{}/1_2_{}_{}.jpg'.format(save_folder, i, angle), image, quality=100)
 
 ## 2. fix obj position(center=[0,0,0], front pose). change camera position&direction, using perspective projection(fovy fixed)
@@ -566,19 +484,28 @@ camera['up'] = [0, 1, 0] #
 # z-axis: eye from far to near, looking at the center of face
 for p in np.arange(500, 250-1, -40): # 0.5m->0.25m
 	camera['eye'] = [0, 0, p]  # stay in front of face
-	image = transform_test(vertices, obj, camera, source) 
+	image = transform_test(vertices, obj, camera, fblood, fmel) 
+	image *= 255 # or any coefficient
+	image = image.astype(np.uint8)
+	image = cv2.rotate(image,cv2.ROTATE_180)
 	io.imsave('{}/2_eye_1_{}.jpg'.format(save_folder, 1000-p), image, quality=100)
 
 # y-axis: eye from down to up, looking at the center of face
 for p in np.arange(-300, 301, 60): # up 0.3m -> down 0.3m
 	camera['eye'] = [0, p, 250] # stay 0.25m far
-	image = transform_test(vertices, obj, camera, source) 
+	image = transform_test(vertices, obj, camera, fblood, fmel) 
+	image *= 255 # or any coefficient
+	image = image.astype(np.uint8)
+	image = cv2.rotate(image,cv2.ROTATE_180)
 	io.imsave('{}/2_eye_2_{}.jpg'.format(save_folder, p/6), image, quality=100)
 
 # x-axis: eye from left to right, looking at the center of face
 for p in np.arange(-300, 301, 60): # left 0.3m -> right 0.3m
 	camera['eye'] = [p, 0, 250] # stay 0.25m far
-	image = transform_test(vertices, obj, camera, source) 
+	image = transform_test(vertices, obj, camera, fblood, fmel) 
+	image *= 255 # or any coefficient
+	image = image.astype(np.uint8)
+	image = cv2.rotate(image,cv2.ROTATE_180)
 	io.imsave('{}/2_eye_3_{}.jpg'.format(save_folder, -p/6), image, quality=100)
 
 # up direction
@@ -593,7 +520,10 @@ for p in np.arange(-50, 51, 10):
 	# note that: rotating up direction is opposite to rotating obj
 	# just imagine: rotating camera 20 degree clockwise, is equal to keeping camera fixed and rotating obj 20 degree anticlockwise.
 	camera['up'] = np.squeeze(up)
-	image = transform_test(vertices, obj, camera, source) 
+	image = transform_test(vertices, obj, camera, fblood, fmel) 
+	image *= 255 # or any coefficient
+	image = image.astype(np.uint8)
+	image = cv2.rotate(image,cv2.ROTATE_180)
 	io.imsave('{}/2_eye_4_{}.jpg'.format(save_folder, -p), image, quality=100)
 
 # -- delete jpg files
