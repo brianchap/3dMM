@@ -115,7 +115,7 @@ def sRGB_generation():
 	wavelength_proper, mu_a_melanin, m_oxy, m_deoxy, musp_total, thickness_papillary_dermis, ma_eumelanin, ma_pheomelanin, mu_a_blood = preparedModel(pheomelanin_ext, eumelanin_ext, deoxy_hemo_ext_coeff, oxy_hemo_ext_coeff)
 	Y = cameraSensitivity(rgbCMF)
 	wavelength = 33
-	dim = 2
+	dim = 256
 	maxmelanin = 0.43
 	maxhemoglobin = 0.07
 	u = np.linspace(0.01, 1, dim)
