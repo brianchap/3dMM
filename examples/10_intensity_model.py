@@ -1,4 +1,4 @@
-#use all the triangles containing a certain vertex to get the normal vector at that point
+#use  all the triangles containing a certain vertex to get the normal vector at that point
 #vertices: list of coordinates for all vertices
 #triangles: set of indices that form a facial triangle
 #colors: same dimensions as the vertices, containing per-vertex color
@@ -14,11 +14,11 @@ sys.path.append('..')
 import face3d
 from face3d import mesh
 
-import cv2
+import cv2 as cv
 import dlib
 import numpy as np
 import scipy.io as sio
-
+import imutils
 # width of beckmann microfacet distribution
 beck_width = 0.35
 
@@ -99,6 +99,110 @@ def brdf(p_s, w_i, w_o):
     d = distr(w_h)
     return (f*p_s*g*d)/(4*cos_to*cos_ti)
 
+##########-----------------skin thickness per vertex functions---------------------##########
+
+# Helper func
+def rect_to_bb(rect):
+    # take a bounding predicted by dlib and convert it
+    # to the format (x, y, w, h) as we would normally do
+    # with OpenCV
+    x = rect.left()
+    y = rect.top()
+    w = rect.right() - x
+    h = rect.bottom() - y
+    # return a tuple of (x, y, w, h)
+    return (x, y, w, h)
+
+# Helper func
+def shape_to_np(shape, dtype="int"):
+    # initialize the list of (x, y)-coordinates
+    coords = np.zeros((68, 2), dtype=dtype)
+    # loop over the 68 facial landmarks and convert them
+    # to a 2-tuple of (x, y)-coordinates
+    for i in range(0, 68):
+        coords[i] = (shape.part(i).x, shape.part(i).y)
+    # return the list of (x, y)-coordinates
+    return coords
+
+# Maps each landmark from 1 to 60, with a corresponding epidermis thickness
+def contruct_mapping():
+    # Doesn't include landmarks 61 - 68 (inside of lips)
+    epi_depth = {1:1.64, 2:1.37, 3:1.37, 4:1.7, 5:1.7, 6:1.5, 7:1.3, 8:1.3, 9:1.54, 10:1.3, 11:1.3, 12:1.5, 13:1.7, 14:1.7, 15:1.37, 16:1.37, 17:1.64, 18:1.64, 19:1.54, 20:1.54, 21:1.54, 22:1.77, 23:1.77, 24:1.54, 25:1.54, 26:1.54, 27:1.64, 28:1.94, 29:1.94, 30:1.58, 31:1.70, 32:1.89, 33:1.58, 34:1.58, 35:1.58, 36:1.89, 37:1.62, 38:1.43, 39:1.0, 40:1.11, 41:1.55, 42:1.14, 43:1.11, 44:1.0, 45:1.43, 46:1.62, 47:1.14, 48:1.14, 49:1.69, 50:1.89, 51:1.58, 52:1.58, 53:1.58, 54:1.89, 55:1.69, 56:1.3, 57:1.4, 58:1.54, 59:1.4, 60:1.3}
+    return epi_depth
+
+# Takes in the 3DMM vertices (properly aligned to the input image), as well as the path to the face landmark pre-traines detector, and...
+# Outputs: a thickness value for every single vertex in the vertices array
+def get_thicknesses(vertices, path_model):
+    #vectors = np.array([ [randrange(0, 500), randrange(0, 500), randrange(0, 500)] for i in range(60000)])
+    #vectors = np.array([ [50,50,100], [250, 250, 213], [400, 10, 0], [200, 400, 0]])
+    # construct the argument parser and parse the arguments
+    #ap = argparse.ArgumentParser()
+    #ap.add_argument("-p", "--shape-predictor", required=True,
+    #help="path to facial landmark predictor")
+    #ap.add_argument("-i", "--image", required=True,
+    #help="path to input image")
+    #args = vars(ap.parse_args())
+    
+    # initialize dlib's face detector (HOG-based) and then create
+    # the facial landmark predictor
+    detector = dlib.get_frontal_face_detector()
+    predictor = dlib.shape_predictor(path_model)
+    
+    # load the input image, resize it, and convert it to grayscale
+    image = cv.imread(image_filename)
+    #image = imutils.resize(image, width=500)
+    gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+    # detect faces in the grayscale image
+    rects = detector(gray, 1)
+    # loop over the face detections
+    rect = rects[0]
+    shape = predictor(gray, rect)
+    shape = shape_to_np(shape)
+    # convert dlib's rectangle to a OpenCV-style bounding box
+    # [i.e., (x, y, w, h)], then draw the face bounding box
+    (x, y, w, h) = rect_to_bb(rect)
+    cv.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    # show the face number
+    cv.putText(image, "Face #1", (x - 10, y - 10),
+               cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    # loop over the (x, y)-coordinates for the facial landmarks
+    # and draw them on the image
+    for j, (x, y) in enumerate(shape):
+        cv.circle(image, (x, y), 1, (0, 0, 255), -1)
+        #cv.putText(image, f"{j+1}", (x, y), cv.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1)
+    # show the output image with the face detections + facial landmarks
+    cv.imshow("Output", image)
+    cv.waitKey(0)
+    print("Beginning to calculate skin depths")
+    epi_depth = contruct_mapping()
+    epi_skin_depth = np.zeros(len(vertices))
+    for i, vert in enumerate(vertices):
+        vert = vert.astype(int)
+        cv.circle(image, (vert[0], vert[1]), 5, (0, 255), -1)
+        closest = [-1, float('inf')]
+        sec_closest = [-1, float('inf')]
+        for j, (x, y) in enumerate(shape):
+            if j >= 60:
+                break
+            euc_dist = math.dist([x,y], vert[:2])
+            min_closest = min(closest[1], euc_dist)
+
+            if min_closest != closest[1]:
+                sec_closest = closest.copy()
+                closest = [j+1, min_closest]
+            else:
+                min_closest = min(sec_closest[1], euc_dist)
+                sec_closest = [j+1, min_closest]
+        tot_clos = closest[1]+sec_closest[1]
+        # NOTE: Arbitrary weightage of closest and second closest thickness, based on distance of other.
+        # Eg. if closest is 1 away and second closest is 4 away, the weight of the closer thickness is 4/5 (and the other weight is 1/5).
+        weight_avg = (epi_depth[closest[0]]*sec_closest[1]/tot_clos) + (epi_depth[sec_closest[0]]*closest[1]/tot_clos)
+        epi_skin_depth[i] = weight_avg #, closest[0], sec_closest[0], vert])
+    #print(f"landmarks:{shape}")
+    #print(f"skin_depths:{skin_depth}")
+    print(f"epi_skin len:{len(epi_skin_depth)}, first few:{epi_skin_depth[:10]}")
+    return epi_skin_depth
+
 molarExtinctionCoeffOxy = {}
 molarExtinctionCoeffDoxy = {}
 with open('extinction_coeff.txt') as f:
@@ -138,7 +242,7 @@ def transform_test(vertices, obj, camera, source, h = 256, w = 256):
 			brdf_val[index] = 0.999999999
 		strength_val[index] = strength_val[index] * brdf_val[index]
 	print('\n' + "BRDF Values")
-	print(np.percentile(brdf_val, 10))
+
 	print(np.percentile(brdf_val, 30))
 	print(np.percentile(brdf_val, 50))
 	print(np.percentile(brdf_val, 70))
@@ -321,10 +425,10 @@ def computeIntensity(lmbda,fblood,fmel,d):
 
 #consolidated function to return strength
 #consolidated function to return strength
-def compute_strength(lmbda,fblood,fmel,vertices,triangles,s,d=0.129126):
+def compute_strength(lmbda,fblood,fmel,vertices,triangles,s,d_epi):
     eps = 1e-6
     #- s is light source coordinates
-    #- d is the avg. skin depth
+    #- d_epi is the avg. skin depth
     #lmbda- wavelength of incident radiation, between 400 and 730 nm
 
     Tepidermis = computeTepidermis(lmbda,fmel)
@@ -339,8 +443,15 @@ def compute_strength(lmbda,fblood,fmel,vertices,triangles,s,d=0.129126):
     print("Angles Values")
     print(np.min(angles))
     print(np.max(angles))
+    print(f"len angles:{len(angles)}")
     print(angles)
-    d_real = d/(np.cos(angles)+eps)
+    print(f"angles[0]:{angles[0]}")
+    print(f"angles[:,0]:{angles[:,0]}")
+    angles = angles[:, 0]
+    cos_angles = np.cos(angles)+eps
+    print(f"Finished making cos_angles, len:{len(cos_angles)}, print f10:{cos_angles[:10]}")
+    d_real = d_epi/cos_angles
+    print(f"Finished making d_real, len:{len(d_real)}, print f10:{d_real[:10]}")
     for index, value in enumerate(d_real):
     	if d_real[index] < 0:
     		d_real[index] = d_real[index] * 0
@@ -380,6 +491,7 @@ print('init bfm model success')
 mat_filename = 'Sample6.mat'
 mat_data = sio.loadmat(mat_filename)
 image_filename = 'Sample6.jpg'
+orig_img = cv.imread(image_filename)
 # with open(image_filename, 'rb') as file:
 #    img = Image.open(file)
 #    print('image size: {0}'.format(img.size))
@@ -394,20 +506,42 @@ colors = bfm.generate_colors(tp)
 
 # --- 3. transform vertices to proper position
 pp = mat_data['Pose_Para']
-s = pp[0, 6]
-# angles = [np.rad2deg(pp[0, 0]), np.rad2deg(pp[0, 1]), np.rad2deg(pp[0, 2])]
-angles2 = pp[0, 0:3]
+
+# NOTE: If left, as is, the vertices are inverted!
+s = -1*pp[0, 6]
+
+# NOTE: The angles in the .mat were in radians instead of degrees
+angles2 = [np.rad2deg(pp[0, 0]), np.rad2deg(pp[0, 1]), np.rad2deg(pp[0, 2])]
+# angles2 = pp[0, 0:3]
 t = pp[0, 3:6]
+
+# NOTE: This is necessary because the translations are relative to the bottom left corner of the image, instead of the opencv standard of top left.
+t[1] = len(orig_img[0]) - t[1]
 
 # set prop of rendering
 h = w = 450
 c = 3
 
 #s = 8e-04
-#angles2 = [10, 30, 20]
-#t = [0, 0, 0]
+#angles2 = [-10, -100, 0]
+# t = [0, 0, 0]
+blank_image = np.zeros((500, 500, 3), np.uint8)
+print(f"angles2:{angles2}")
 transformed_vertices = bfm.transform(vertices, s, angles2, t)
 projected_vertices = transformed_vertices.copy()  # using stantard camera & orth projection
+
+
+#orig_img = imutils.resize(orig_img, width=500)
+print(f"projected_vertices len:{len(projected_vertices)}, max:{np.max(projected_vertices)}, min:{np.min(projected_vertices)}, 0th:{projected_vertices[0]}, all:{projected_vertices}")
+for vert in projected_vertices:
+    cv.circle(blank_image, (int(vert[0]), int(vert[1])), 1, (0, 255, 0), 1)
+    cv.circle(orig_img, (int(vert[0]), int(vert[1])), 1, (0, 255, 0), 1)
+    
+cv.imshow("projected_vertices", blank_image)
+cv.imshow("orig_img", orig_img)
+cv.waitKey(0)
+cv.destroyAllWindows()
+    
 # projected_vertices[:,1] = h - projected_vertices[:,1] - 1
 # --- 4. render(3d obj --> 2d image)
 image_vertices = mesh.transform.to_image(projected_vertices, h, w)
@@ -421,14 +555,18 @@ triangles = bfm.triangles
 #global triangles
 #colors = C['colors']; triangles = C['triangles']
 orig_source = [400, 100, 50]
+print(f"Num vertices:{len(vertices)}, triangles:{len(triangles)}")
+epi_thicknesses = get_thicknesses(projected_vertices, "../brdf_thickness/landmark_model/shape_predictor_68_face_landmarks.dat")
 for cam_ang in [-25, 25]:
     for i in range(3):
         source = orig_source.copy()
         source[i] += cam_ang
         source = tuple(source)
+        # DELETE THIS if you want to loop through different light source angles
+        source = orig_source.copy()
         colors = colors/np.max(colors)
 
-        strength_val, angles, normals = compute_strength(550, 0.045, 0.22, vertices, triangles, source)
+        strength_val, angles, normals = compute_strength(550, 0.045, 0.22, vertices, triangles, source, epi_thicknesses)
         print('\n' + "Bounds Check")
         print(np.percentile(strength_val, 1))
         print(np.percentile(strength_val, 100))
@@ -482,7 +620,8 @@ for cam_ang in [-25, 25]:
                 obj['s'] = scale_init*factor
                 obj['angles'] = [0, 0, 0]
                 obj['t'] = [0, 0, 0]
-                image = transform_test(vertices, obj, camera, source) 
+                image = transform_test(vertices, obj, camera, source)
+                print(f"image printed:{image}")
                 io.imsave('{}/1_1_{:.2f}.jpg'.format(save_folder, factor), image, quality=100)
 
         # angles
