@@ -230,6 +230,13 @@ def get_thicknesses(vertices, path_model):
     sum_d /= len(derm_depth)
     print(f"average dermdepth:{sum_d}")
 
+    sum_e = 0
+    for key in epi_depth:
+        sum_e += epi_depth[key]
+    sum_e /= len(epi_depth)
+    print(f"average epidepth:{sum_e}")
+
+    
     return np.array(epi_skin_depth), np.array(derm_skin_depth)
 
 molarExtinctionCoeffOxy = {}
@@ -419,14 +426,14 @@ def computeRdermis(lmbda,fblood,d):
   Rdermis = ( DR_DK * DK_Dk + DR_Dbeta2 * Dbeta2_Dk ) * Dk_Dfblood * deltaFblood
   return Rdermis
 
-def computeAbsorptionCoefficientEpidermis(lmbda,fmel):
-  mumel = 6.6 * pow(10,11) * pow(lmbda,-3.33)
-  muskin = computeAbsorptionCoefficientSkin(lmbda)
-  return fmel * mumel + (1-fmel) * muskin
+def computeAbsorptionCoefficientEpidermis(lmbda,fmel, d_epi):
+    mumel = d_epi * 6.6 * pow(10,11) * pow(lmbda,-3.33)
+    muskin = computeAbsorptionCoefficientSkin(lmbda)
+    return fmel * mumel + (1-fmel) * muskin
 
-def computeTepidermis(lmbda,fmel):
-  muepidermis = computeAbsorptionCoefficientEpidermis(lmbda,fmel)
-  return np.exp(-1 * 0.004466 * muepidermis)
+def computeTepidermis(lmbda,fmel, d_epi):
+  muepidermis = computeAbsorptionCoefficientEpidermis(lmbda,fmel, d_epi)
+  return np.exp(-1 * muepidermis)
 
 def computeTotalReflectance(lmbda,fblood,fmel,d):
   Rdermis = computeRdermis(lmbda,fblood,d)
@@ -447,21 +454,20 @@ def computeTotalReflectance(lmbda,fblood,fmel,d):
 #
 #   return pow(dRdermis,2)/pow(R,2)
 
-def computeIntensity(lmbda,fblood,fmel,d):
-  Tepidermis = computeTepidermis(lmbda,fmel)
+def computeIntensity(lmbda,fblood,fmel,d, d_epi):
+  Tepidermis = computeTepidermis(lmbda,fmel, d_epi)
   dRdermis = computeTotalReflectance(lmbda,fblood,fmel,d)
   return np.abs(Tepidermis*Tepidermis*dRdermis)
 
 #consolidated function to return strength
 #consolidated function to return strength
-def compute_strength(lmbda,fblood,fmel,vertices,triangles,s,d_epi):
-    d_epi = 0.129126
+def compute_strength(lmbda,fblood,fmel,vertices,triangles,s,d_derm, d_epi):
     eps = 1e-6
     #- s is light source coordinates
     #- d_epi is the avg. skin depth
     #lmbda- wavelength of incident radiation, between 400 and 730 nm
 
-    Tepidermis = computeTepidermis(lmbda,fmel)
+    Tepidermis = computeTepidermis(lmbda,fmel, d_epi)
     b = computeBeta(lmbda,fblood)
     K = computeK(lmbda,fblood)
 
@@ -480,7 +486,7 @@ def compute_strength(lmbda,fblood,fmel,vertices,triangles,s,d_epi):
     angles = angles[:, 0]
     cos_angles = np.cos(angles)+eps
     print(f"Finished making cos_angles, len:{len(cos_angles)}, print f10:{cos_angles[:10]}")
-    d_real = d_epi/cos_angles
+    d_real = d_derm/cos_angles
     print(f"Finished making d_real, len:{len(d_real)}, print f10:{d_real[:10]}")
     for index, value in enumerate(d_real):
     	if d_real[index] < 0:
@@ -598,7 +604,7 @@ for cam_ang in [-25, 25]:
         source = orig_source.copy()
         colors = colors/np.max(colors)
 
-        strength_val, angles, normals = compute_strength(550, 0.045, 0.22, vertices, triangles, source, derm_depth)
+        strength_val, angles, normals = compute_strength(550, 0.045, 0.22, vertices, triangles, source, derm_depth, epi_depth)
         print('\n' + "Bounds Check")
         print(np.percentile(strength_val, 1))
         print(np.percentile(strength_val, 100))
