@@ -150,6 +150,7 @@ def find_mid(shape, i1, i2, frac):
 # Outputs: a thickness value for every single vertex in the vertices array
 def get_thicknesses(vertices, path_model):
     epi_depth, derm_depth = contruct_mapping()
+
     # initialize dlib's face detector (HOG-based) and then create
     # the facial landmark predictor
     detector = dlib.get_frontal_face_detector()
@@ -175,7 +176,9 @@ def get_thicknesses(vertices, path_model):
             epi_depth[len(shape)] = e_depth*29.57/10000
         for d_depth in [1.55, 1.51, 1.38, 1.53, 1.38, 1.51, 1.55, 1.74, 1.58, 1.64, 1.74, 1.58, 1.64]:
             derm_depth[len(shape)] = d_depth*758.85/10000
+
     print(f"len shape:{len(shape)}, len dict:{len(derm_depth)}")
+
     # convert dlib's rectangle to a OpenCV-style bounding box
     # [i.e., (x, y, w, h)], then draw the face bounding box
     (x, y, w, h) = rect_to_bb(rect)
@@ -183,11 +186,12 @@ def get_thicknesses(vertices, path_model):
     # show the face number
     cv.putText(image, "Face #1", (x - 10, y - 10),
                cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
     # loop over the (x, y)-coordinates for the facial landmarks
     # and draw them on the image
     for j, (x, y) in enumerate(shape):
         cv.circle(image, (x, y), 2, (0, 0, 255), -1)
-        #cv.putText(image, f"{j+1}", (x, y), cv.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1)
+        
     # show the output image with the face detections + facial landmarks
     cv.imshow("Output", image)
     cv.waitKey(0)
@@ -211,10 +215,12 @@ def get_thicknesses(vertices, path_model):
                 min_closest = min(sec_closest[1], euc_dist)
                 sec_closest = [j+1, min_closest]
         tot_clos = closest[1]+sec_closest[1]
+
         # NOTE: Arbitrary weightage of closest and second closest thickness, based on distance of other.
         # Eg. if closest is 1 away and second closest is 4 away, the weight of the closer thickness is 4/5 (and the other weight is 1/5).
-        derm_weight_avg = (derm_depth[closest[0]]*sec_closest[1]/tot_clos) + (derm_depth[sec_closest[0]]*closest[1]/tot_clos)
         epi_weight_avg = (epi_depth[closest[0]]*sec_closest[1]/tot_clos) + (epi_depth[sec_closest[0]]*closest[1]/tot_clos)
+        derm_weight_avg = (derm_depth[closest[0]]*sec_closest[1]/tot_clos) + (derm_depth[sec_closest[0]]*closest[1]/tot_clos)
+
         epi_skin_depth[i] = epi_weight_avg #, closest[0], sec_closest[0], vert])
         derm_skin_depth[i] = derm_weight_avg #, closest[0], sec_closest[0], vert])
 
@@ -532,15 +538,16 @@ colors = bfm.generate_colors(tp)
 pp = mat_data['Pose_Para']
 
 # NOTE: If left, as is, the vertices are inverted!
-s = -1*pp[0, 6]
+d_s = -1*pp[0, 6]
+s = pp[0, 6]
 
 # NOTE: The angles in the .mat were in radians instead of degrees
-angles2 = [np.rad2deg(pp[0, 0]), np.rad2deg(pp[0, 1]), np.rad2deg(pp[0, 2])]
-# angles2 = pp[0, 0:3]
+d_angles2 = [np.rad2deg(pp[0, 0]), np.rad2deg(pp[0, 1]), np.rad2deg(pp[0, 2])]
+angles2 = pp[0, 0:3]
 t = pp[0, 3:6]
-
+d_t = t.copy()
 # NOTE: This is necessary because the translations are relative to the bottom left corner of the image, instead of the opencv standard of top left.
-t[1] = len(orig_img[0]) - t[1]
+d_t[1] = len(orig_img[0]) - t[1]
 
 # set prop of rendering
 h = w = 450
@@ -551,17 +558,18 @@ c = 3
 # t = [0, 0, 0]
 blank_image = np.zeros((500, 500, 3), np.uint8)
 print(f"angles2:{angles2}")
+depth_var_vertices = bfm.transform(vertices, d_s, d_angles2, d_t)
 transformed_vertices = bfm.transform(vertices, s, angles2, t)
 projected_vertices = transformed_vertices.copy()  # using stantard camera & orth projection
 
 
 #orig_img = imutils.resize(orig_img, width=500)
 print(f"projected_vertices len:{len(projected_vertices)}, max:{np.max(projected_vertices)}, min:{np.min(projected_vertices)}, 0th:{projected_vertices[0]}, all:{projected_vertices}")
-for vert in projected_vertices:
+for vert in depth_var_vertices:
     cv.circle(blank_image, (int(vert[0]), int(vert[1])), 1, (0, 255, 0), 1)
     cv.circle(orig_img, (int(vert[0]), int(vert[1])), 1, (0, 255, 0), 1)
     
-cv.imshow("projected_vertices", blank_image)
+cv.imshow("depth_var_vertices", blank_image)
 cv.imshow("orig_img", orig_img)
 cv.waitKey(0)
 cv.destroyAllWindows()
@@ -580,7 +588,7 @@ triangles = bfm.triangles
 #colors = C['colors']; triangles = C['triangles']
 orig_source = [400, 100, 50]
 print(f"Num vertices:{len(vertices)}, triangles:{len(triangles)}")
-epi_depth, derm_depth = get_thicknesses(projected_vertices, "../brdf_thickness/landmark_model/shape_predictor_68_face_landmarks.dat")
+epi_depth, derm_depth = get_thicknesses(depth_var_vertices, "../brdf_thickness/landmark_model/shape_predictor_68_face_landmarks.dat")
 for cam_ang in [-25, 25]:
     for i in range(3):
         source = orig_source.copy()
