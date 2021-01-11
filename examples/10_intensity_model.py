@@ -128,21 +128,28 @@ def shape_to_np(shape, dtype="int"):
 def contruct_mapping():
     # Doesn't include landmarks 61 - 68 (inside of lips)
     epi_depth = {1:1.64, 2:1.37, 3:1.37, 4:1.7, 5:1.7, 6:1.5, 7:1.3, 8:1.3, 9:1.54, 10:1.3, 11:1.3, 12:1.5, 13:1.7, 14:1.7, 15:1.37, 16:1.37, 17:1.64, 18:1.64, 19:1.54, 20:1.54, 21:1.54, 22:1.77, 23:1.77, 24:1.54, 25:1.54, 26:1.54, 27:1.64, 28:1.94, 29:1.94, 30:1.58, 31:1.70, 32:1.89, 33:1.58, 34:1.58, 35:1.58, 36:1.89, 37:1.62, 38:1.43, 39:1.0, 40:1.11, 41:1.55, 42:1.14, 43:1.11, 44:1.0, 45:1.43, 46:1.62, 47:1.14, 48:1.14, 49:1.69, 50:1.89, 51:1.58, 52:1.58, 53:1.58, 54:1.89, 55:1.69, 56:1.3, 57:1.4, 58:1.54, 59:1.4, 60:1.3}
-    return epi_depth
+    epi_scale = 29.57
+    for key in epi_depth:
+        epi_depth[key] *= epi_scale/10000
+    derm_depth = {1:1.47, 2:1.55, 3:1.53, 4:1.51, 5:1.51, 6:1.45, 7:1.38, 8:1.46, 9:1.53, 10:1.46, 11:1.38, 12:1.45, 13:1.51, 14:1.51, 15:1.53, 16:1.55, 17:1.47, 18:1.43, 19:1.39, 20:1.35, 21:1.46, 22:1.58, 23:1.58, 24:1.46, 25:1.35, 26:1.39, 27:1.43, 28:1.67, 29:1.77, 30:2.08, 31:1.68, 32:1.74, 33:2.12, 34:1.63, 35:2.12, 36:1.74, 37:1.3, 38:1.43, 39:1.36, 40:1.45, 41:1.59, 42:1.62, 43:1.45, 44:1.36, 45:1.43, 46:1.3, 47:1.45, 48:1.62, 49:1.78, 50:2.12, 51:1.88, 52:1.63, 53:1.88, 54:2.12, 55:1.78, 56:1.38, 57:1.46, 58:1.53, 59:1.46, 60:1.38}
+    derm_scale = 758.85
+    for key in derm_depth:
+        derm_depth[key] *= derm_scale/10000
+    return epi_depth, derm_depth
+
+# Given two points already on the map, this function returns the coordinates
+# and the thickness at the point colinear with the other two points and frac of the way up from the first point
+def find_mid(shape, i1, i2, frac):
+    x1, y1 = shape[i1-1]
+    x2, y2 = shape[i2-1]
+    xo = x1 + (x2-x1)*frac
+    yo = y1 + (y2-y1)*frac
+    return [int(xo), int(yo)]
 
 # Takes in the 3DMM vertices (properly aligned to the input image), as well as the path to the face landmark pre-traines detector, and...
 # Outputs: a thickness value for every single vertex in the vertices array
 def get_thicknesses(vertices, path_model):
-    #vectors = np.array([ [randrange(0, 500), randrange(0, 500), randrange(0, 500)] for i in range(60000)])
-    #vectors = np.array([ [50,50,100], [250, 250, 213], [400, 10, 0], [200, 400, 0]])
-    # construct the argument parser and parse the arguments
-    #ap = argparse.ArgumentParser()
-    #ap.add_argument("-p", "--shape-predictor", required=True,
-    #help="path to facial landmark predictor")
-    #ap.add_argument("-i", "--image", required=True,
-    #help="path to input image")
-    #args = vars(ap.parse_args())
-    
+    epi_depth, derm_depth = contruct_mapping()
     # initialize dlib's face detector (HOG-based) and then create
     # the facial landmark predictor
     detector = dlib.get_frontal_face_detector()
@@ -158,6 +165,17 @@ def get_thicknesses(vertices, path_model):
     rect = rects[0]
     shape = predictor(gray, rect)
     shape = shape_to_np(shape)
+    shape = shape[:60]
+    
+    # Add new points to dict and face landmarks: epidermis
+    for i1, i2, frac in [[30, 2, 1/2], [4, 31, 1/4], [49, 6, 1/2], [58, 9, 1/2], [55, 12, 1/2], [14, 31, 1/4], [30, 16, 1/2], [31, 4, 1/4], [30, 3, 1/5], [29, 2, 1/6], [31, 14, 1/4], [30, 15, 1/5], [29, 16, 1/6]]:
+        x1, y1 = find_mid(shape, i1, i2, frac)
+        shape = np.append(shape, [[x1, y1]], axis=0)
+        for e_depth in [1.37, 1.7, 1.3, 1.54, 1.3, 1.7, 1.37, 2.56, 2.59, 2.3, 2.56, 2.59, 2.3]:
+            epi_depth[len(shape)] = e_depth*29.57/10000
+        for d_depth in [1.55, 1.51, 1.38, 1.53, 1.38, 1.51, 1.55, 1.74, 1.58, 1.64, 1.74, 1.58, 1.64]:
+            derm_depth[len(shape)] = d_depth*758.85/10000
+    print(f"len shape:{len(shape)}, len dict:{len(derm_depth)}")
     # convert dlib's rectangle to a OpenCV-style bounding box
     # [i.e., (x, y, w, h)], then draw the face bounding box
     (x, y, w, h) = rect_to_bb(rect)
@@ -168,22 +186,21 @@ def get_thicknesses(vertices, path_model):
     # loop over the (x, y)-coordinates for the facial landmarks
     # and draw them on the image
     for j, (x, y) in enumerate(shape):
-        cv.circle(image, (x, y), 1, (0, 0, 255), -1)
+        cv.circle(image, (x, y), 2, (0, 0, 255), -1)
         #cv.putText(image, f"{j+1}", (x, y), cv.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1)
     # show the output image with the face detections + facial landmarks
     cv.imshow("Output", image)
     cv.waitKey(0)
-    print("Beginning to calculate skin depths")
-    epi_depth = contruct_mapping()
+
     epi_skin_depth = np.zeros(len(vertices))
+    derm_skin_depth = np.zeros(len(vertices))
+    
     for i, vert in enumerate(vertices):
         vert = vert.astype(int)
         cv.circle(image, (vert[0], vert[1]), 5, (0, 255), -1)
         closest = [-1, float('inf')]
         sec_closest = [-1, float('inf')]
         for j, (x, y) in enumerate(shape):
-            if j >= 60:
-                break
             euc_dist = math.dist([x,y], vert[:2])
             min_closest = min(closest[1], euc_dist)
 
@@ -196,12 +213,18 @@ def get_thicknesses(vertices, path_model):
         tot_clos = closest[1]+sec_closest[1]
         # NOTE: Arbitrary weightage of closest and second closest thickness, based on distance of other.
         # Eg. if closest is 1 away and second closest is 4 away, the weight of the closer thickness is 4/5 (and the other weight is 1/5).
-        weight_avg = (epi_depth[closest[0]]*sec_closest[1]/tot_clos) + (epi_depth[sec_closest[0]]*closest[1]/tot_clos)
-        epi_skin_depth[i] = weight_avg #, closest[0], sec_closest[0], vert])
-    #print(f"landmarks:{shape}")
-    #print(f"skin_depths:{skin_depth}")
-    print(f"epi_skin len:{len(epi_skin_depth)}, first few:{epi_skin_depth[:10]}")
-    return epi_skin_depth
+        derm_weight_avg = (derm_depth[closest[0]]*sec_closest[1]/tot_clos) + (derm_depth[sec_closest[0]]*closest[1]/tot_clos)
+        epi_weight_avg = (epi_depth[closest[0]]*sec_closest[1]/tot_clos) + (epi_depth[sec_closest[0]]*closest[1]/tot_clos)
+        epi_skin_depth[i] = epi_weight_avg #, closest[0], sec_closest[0], vert])
+        derm_skin_depth[i] = derm_weight_avg #, closest[0], sec_closest[0], vert])
+
+    sum_d = 0
+    for key in derm_depth:
+        sum_d += derm_depth[key]
+    sum_d /= len(derm_depth)
+    print(f"average dermdepth:{sum_d}")
+
+    return np.array(epi_skin_depth), np.array(derm_skin_depth)
 
 molarExtinctionCoeffOxy = {}
 molarExtinctionCoeffDoxy = {}
@@ -426,6 +449,7 @@ def computeIntensity(lmbda,fblood,fmel,d):
 #consolidated function to return strength
 #consolidated function to return strength
 def compute_strength(lmbda,fblood,fmel,vertices,triangles,s,d_epi):
+    d_epi = 0.129126
     eps = 1e-6
     #- s is light source coordinates
     #- d_epi is the avg. skin depth
@@ -556,7 +580,7 @@ triangles = bfm.triangles
 #colors = C['colors']; triangles = C['triangles']
 orig_source = [400, 100, 50]
 print(f"Num vertices:{len(vertices)}, triangles:{len(triangles)}")
-epi_thicknesses = get_thicknesses(projected_vertices, "../brdf_thickness/landmark_model/shape_predictor_68_face_landmarks.dat")
+epi_depth, derm_depth = get_thicknesses(projected_vertices, "../brdf_thickness/landmark_model/shape_predictor_68_face_landmarks.dat")
 for cam_ang in [-25, 25]:
     for i in range(3):
         source = orig_source.copy()
@@ -566,7 +590,7 @@ for cam_ang in [-25, 25]:
         source = orig_source.copy()
         colors = colors/np.max(colors)
 
-        strength_val, angles, normals = compute_strength(550, 0.045, 0.22, vertices, triangles, source, epi_thicknesses)
+        strength_val, angles, normals = compute_strength(550, 0.045, 0.22, vertices, triangles, source, derm_depth)
         print('\n' + "Bounds Check")
         print(np.percentile(strength_val, 1))
         print(np.percentile(strength_val, 100))
