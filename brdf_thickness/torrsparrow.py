@@ -55,8 +55,8 @@ def dielectric(ci, ct, ei, et):
 def fres(cos_i):
     cos_i = abs(cos_i)
     g = sqrt((eta_t**2)/(eta_i**2) - 1 + cos_i**2)
-    first_term = 0.5 * ((g - c)**2)/((g + c)**2)
-    second_term = 1 + (((c * (g + c) - 1)**2)/((c * (g - c) + 1)**2))
+    first_term = 0.5 * ((g - cos_i)**2)/((g + cos_i)**2)
+    second_term = 1 + (((cos_i * (g + cos_i) - 1)**2)/((cos_i * (g - cos_i) + 1)**2))
 
     return first_term * second_term
     
@@ -102,7 +102,7 @@ def brdf(p_s, w_i, w_o):
 
     # Normalize w_h
     norm_wh = w_h / np.linalg.norm(w_h)
-    f = fres(np.dot(w_i, w_h))
+    f = fres_rust(np.dot(w_i, w_h))
     g = geom(w_i, w_o, w_h)
     d = distr(w_h)
     return (p_s * f * g * d)/(4 * cos_to * cos_ti)

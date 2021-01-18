@@ -67,12 +67,12 @@ def dielectric(ci, ct, ei, et):
     return [0.5 * (r_par * r_par + r_perp * r_perp) for i in range(4)]
 
     
-# Fresnel reflectance function for dielectrics (skin?)
+# Fresnel reflectance function. My own implementation using the fresnel equations (https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.pdf; eq. 22)
 def fres(cos_i):
     cos_i = abs(cos_i)
-    g = np.sqrt((eta_t**2)/(eta_i**2) - 1 + cos_i**2)
-    first_term = 0.5 * ((g - c)**2)/((g + c)**2)
-    second_term = 1 + (((c * (g + c) - 1)**2)/((c * (g - c) + 1)**2))
+    g = sqrt((eta_t**2)/(eta_i**2) - 1 + cos_i**2)
+    first_term = 0.5 * ((g - cos_i)**2)/((g + cos_i)**2)
+    second_term = 1 + (((cos_i * (g + cos_i) - 1)**2)/((cos_i * (g - cos_i) + 1)**2))
 
     return first_term * second_term
 
@@ -94,7 +94,7 @@ def brdf(p_s, w_i, w_o):
 
     # Normalize w_h
     norm_wh = w_h / np.linalg.norm(w_h)
-    f = fres(np.dot(w_i, w_h))
+    f = fres_rust(np.dot(w_i, w_h))
     g = geom(w_i, w_o, w_h)
     d = distr(w_h)
     return (f*p_s*g*d)/(4*cos_to*cos_ti)
@@ -248,51 +248,66 @@ with open('extinction_coeff.txt') as f:
        molarExtinctionCoeffDoxy[int(lmbda)] = float(mudoxy)
 
 def transform_test(vertices, obj, camera, source, h = 256, w = 256):
-	'''
-	Args:
-		obj: dict contains obj transform paras
-		camera: dict contains camera paras
-	'''
-	R = mesh.transform.angle2matrix(obj['angles'])
-	transformed_vertices = mesh.transform.similarity_transform(vertices, obj['s'], R, obj['t'])
-	
-	if camera['proj_type'] == 'orthographic':
-		projected_vertices = transformed_vertices
-		image_vertices = mesh.transform.to_image(projected_vertices, h, w)
-	else:
+  '''
+  Args:
+    obj: dict contains obj transform paras
+    camera: dict contains camera paras
+  '''
+  R = mesh.transform.angle2matrix(obj['angles'])
+  transformed_vertices = mesh.transform.similarity_transform(vertices, obj['s'], R, obj['t'])
+  # orig_vert_img  = np.zeros((300, 300, 3), np.uint8)
+  # image_vert_img = np.zeros((300, 300, 3), np.uint8)
+  if camera['proj_type'] == 'orthographic':
+    projected_vertices = transformed_vertices
+    image_vertices = mesh.transform.to_image(projected_vertices, h, w)
+    # print(f"image_vertices{image_vertices}")
+    # for i in range(len(image_vertices)):
+      
+    #   orig_vert = projected_vertices[i]
+    #   img_vert = image_vertices[i]
+    #   cv.circle(orig_vert_img, (int(orig_vert[0])+100, int(orig_vert[2])+100), 1, (0, 255, 0), 1)
+    #   cv.circle(image_vert_img, (int(img_vert[0]), int(img_vert[2])+100), 1, (0, 255, 0), 1)
+  
+    # cv.imshow("image vertices", image_vert_img)
+    # cv.imshow("orig_img", orig_vert_img)
+    # cv.waitKey(0)
+    # cv.destroyAllWindows()
 
-		## world space to camera space. (Look at camera.) 
-		camera_vertices = mesh.transform.lookat_camera(transformed_vertices, camera['eye'], camera['at'], camera['up'])
-		## camera space to image space. (Projection) if orth project, omit
-		projected_vertices = mesh.transform.perspective_project(camera_vertices, camera['fovy'], near = camera['near'], far = camera['far'])
-		## to image coords(position in image)
-		image_vertices = mesh.transform.to_image(projected_vertices, h, w, True)
+  else:
 
-	brdf_val = []
-	for index, value in enumerate(vertices):
-		brdf_val.append(brdf(0.1, vertices[index]-source, camera['eye']-vertices[index]))
-	midpoint = 0.5/np.percentile(brdf_val, 50)
-	for index, value in enumerate(brdf_val):
-		brdf_val[index] = brdf_val[index]*midpoint
-		if brdf_val[index] > 1:
-			brdf_val[index] = 0.999999999
-		strength_val[index] = strength_val[index] * brdf_val[index]
-	print('\n' + "BRDF Values")
+    ## world space to camera space. (Look at camera.) 
+    camera_vertices = mesh.transform.lookat_camera(transformed_vertices, camera['eye'], camera['at'], camera['up'])
+    ## camera space to image space. (Projection) if orth project, omit
+    projected_vertices = mesh.transform.perspective_project(camera_vertices, camera['fovy'], near = camera['near'], far = camera['far'])
+    ## to image coords(position in image)
+    image_vertices = mesh.transform.to_image(projected_vertices, h, w, True)
 
-	print(np.percentile(brdf_val, 30))
-	print(np.percentile(brdf_val, 50))
-	print(np.percentile(brdf_val, 70))
-	print(np.percentile(brdf_val, 90))
 
-	#CHANGE THE LINE BELOW THIS FROM NORMALS -> ANGLES OR STRENGTH_VAL AS APPROPRIATE
-	rendering = mesh.render.render_colors(image_vertices, triangles, strength_val, h, w, c=1)
-	#print(image_vertices.shape)
-	#print(triangles.shape)
-	#print(normals.shape)
-	rendering = np.concatenate((np.zeros((h, w, 1)), rendering), 2)
-	rendering = np.concatenate((np.zeros((h, w, 1)), rendering), 2)
-	#rendering = np.minimum((np.maximum(rendering, 0)), 1)
-	return rendering
+  brdf_val = []
+  for index, value in enumerate(vertices):
+    brdf_val.append(brdf(0.1, vertices[index]-source, camera['eye']-vertices[index]))
+  midpoint = 0.5/np.percentile(brdf_val, 50)
+  for index, value in enumerate(brdf_val):
+    brdf_val[index] = brdf_val[index]*midpoint
+    if brdf_val[index] > 1:
+      brdf_val[index] = 0.999999999
+    strength_val[index] = strength_val[index] * brdf_val[index]
+  print('\n' + "BRDF Values")
+
+  print(np.percentile(brdf_val, 30))
+  print(np.percentile(brdf_val, 50))
+  print(np.percentile(brdf_val, 70))
+  print(np.percentile(brdf_val, 90))
+
+  #CHANGE THE LINE BELOW THIS FROM NORMALS -> ANGLES OR STRENGTH_VAL AS APPROPRIATE
+  rendering = mesh.render.render_colors(image_vertices, triangles, strength_val, h, w, c=1)
+  #print(image_vertices.shape)
+  #print(triangles.shape)
+  #print(normals.shape)
+  rendering = np.concatenate((np.zeros((h, w, 1)), rendering), 2)
+  rendering = np.concatenate((np.zeros((h, w, 1)), rendering), 2)
+  #rendering = np.minimum((np.maximum(rendering, 0)), 1)
+  return rendering
 
 #geometric functions for normal and angle calculation
 def normals_compute(vertices,triangles):
