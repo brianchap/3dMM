@@ -19,6 +19,7 @@ import dlib
 import numpy as np
 import scipy.io as sio
 import imutils
+from math import sqrt
 # width of beckmann microfacet distribution
 beck_width = 0.35
 
@@ -70,11 +71,35 @@ def dielectric(ci, ct, ei, et):
 # Fresnel reflectance function. My own implementation using the fresnel equations (https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.pdf; eq. 22)
 def fres(cos_i):
     cos_i = abs(cos_i)
+    #print(f"sqrt value:{((eta_t**2)/(eta_i**2) - 1 + cos_i**2)}")
     g = sqrt((eta_t**2)/(eta_i**2) - 1 + cos_i**2)
     first_term = 0.5 * ((g - cos_i)**2)/((g + cos_i)**2)
     second_term = 1 + (((cos_i * (g + cos_i) - 1)**2)/((cos_i * (g - cos_i) + 1)**2))
 
     return first_term * second_term
+# Fresnel reflectance function for dielectrics (skin?) Implemented using the rust code from github
+def fres_rust(cos_i):
+    if cos_i < -1:
+        ci = -1
+    elif cos_i > 1:
+        ci = 1
+    else:
+        ci = cos_i
+
+    if ci > 0:
+        ei = eta_i
+        et = eta_t
+    else:
+        ei = eta_t
+        et = eta_i
+
+    sin_t = ei / et * sqrt(max(0, 1 - ci*ci))
+
+    if sin_t >= 1:
+        return [0]*4
+    else:
+        ct = sqrt(max(0, 1 - sin_t * sin_t))
+        return dielectric(abs(ci), ct, ei, et)
 
 # Implementation of torrance-sparrow microfacet BRDF
 # Inputs:
@@ -94,7 +119,7 @@ def brdf(p_s, w_i, w_o):
 
     # Normalize w_h
     norm_wh = w_h / np.linalg.norm(w_h)
-    f = fres_rust(np.dot(w_i, w_h))
+    f = fres(np.dot(w_i, w_h))
     g = geom(w_i, w_o, w_h)
     d = distr(w_h)
     return (f*p_s*g*d)/(4*cos_to*cos_ti)
