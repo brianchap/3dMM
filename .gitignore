@@ -1,0 +1,8 @@
+examples/Data/BFM/
+examples/cam_sens.mat
+examples/results/intensity_distro/*.jpg
+examples/output_vertices.npy
+examples/outputs.npy
+examples/results/intensity_distro/figs/
+examples/results/intensity_distro/light_source/*
+examples/results/intensity_distro_light_source/*
