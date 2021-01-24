@@ -1,5 +1,5 @@
 # 3dMM
-**UPDATE 01/20: Please work with pipeline_1.0.py file. There are several modifications for smoother implementation. So please don't try merging the changes to your local files. It will take up a lot of your time.** 
+**UPDATE 01/20: Please work with pipeline_1.1.py file. There are several modifications for smoother implementation. So please don't try merging the changes to your local files. It will take up a lot of your time.** 
 
 **UPDATE 12/26: Please run 10_intensity_model.py in lieu of 9_intensity_model.py for the newest results.**
 
