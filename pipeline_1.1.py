@@ -673,6 +673,15 @@ if not os.path.exists(sf):
 # Rendering the strength results
 for k in range(len(cam_strs)):
 	img = mesh.render.render_colors(cam_verts[k], triangles, cam_strs[k], h, w, c=1)
+	avg_intensity = 0
+	avg_count = 0
+	for r in range(img.shape[0]):
+		for c in range(img.shape[1]):
+			if img[r][c] != 0:
+				avg_intensity = avg_intensity + img[r][c]
+				avg_count = avg_count + 1
+	avg_intensity = avg_intensity/avg_count
+	print("Avg Intensity for Camera Eye Positions: " + str(avg_intensity))
 	img = np.concatenate((np.zeros((h, w, 1)), img), 2)
 	img = np.concatenate((np.zeros((h, w, 1)), img), 2)
 	img *= 255 # or any coefficient
@@ -699,6 +708,15 @@ cam_pos_str[99] = stv
 cam_verts[99] = vs
 
 img = mesh.render.render_colors(cam_verts[99], triangles, cam_strs[99], h, w, c=1)
+avg_intensity = 0
+avg_count = 0
+for r in range(img.shape[0]):
+	for c in range(img.shape[1]):
+		if img[r][c] != 0:
+			avg_intensity = avg_intensity + img[r][c]
+			avg_count = avg_count + 1
+avg_intensity = avg_intensity/avg_count
+print("Avg Intensity for Camera Eye Positions: " + str(avg_intensity))
 img = np.concatenate((np.zeros((h, w, 1)), img), 2)
 img = np.concatenate((np.zeros((h, w, 1)), img), 2)
 img *= 255 # or any coefficient
@@ -746,6 +764,15 @@ if not os.path.exists(sf):
 # Rendering the strength results
 for k in range(len(light_strs)):
 	img = mesh.render.render_colors(light_verts[k], triangles, light_strs[k], h, w, c=1)
+	avg_intensity = 0
+	avg_count = 0
+	for r in range(img.shape[0]):
+		for c in range(img.shape[1]):
+			if img[r][c] != 0:
+				avg_intensity = avg_intensity + img[r][c]
+				avg_count = avg_count + 1
+	avg_intensity = avg_intensity/avg_count
+	print("Avg Intensity for Source Positions: " + str(avg_intensity))
 	img = np.concatenate((np.zeros((h, w, 1)), img), 2)
 	img = np.concatenate((np.zeros((h, w, 1)), img), 2)
 	img *= 255 # or any coefficient
@@ -775,6 +802,15 @@ light_strs = np.nan_to_num(light_strs)
 light_strs = light_strs/np.max(light_strs)
 light_sum = np.sum(light_strs, axis = 1)
 img = mesh.render.render_colors(light_verts[99], triangles, light_strs[99], h, w, c=1)
+avg_intensity = 0
+avg_count = 0
+for r in range(img.shape[0]):
+	for c in range(img.shape[1]):
+		if img[r][c] != 0:
+			avg_intensity = avg_intensity + img[r][c]
+			avg_count = avg_count + 1
+avg_intensity = avg_intensity/avg_count
+print("Avg Intensity for Source Positions: " + str(avg_intensity))
 img = np.concatenate((np.zeros((h, w, 1)), img), 2)
 img = np.concatenate((np.zeros((h, w, 1)), img), 2)
 img *= 255 # or any coefficient
@@ -807,6 +843,15 @@ if not os.path.exists(sf):
 # Rendering the strength results
 for k in range(len(temp_strs)):
 	img = mesh.render.render_colors(temp_verts[k], triangles, temp_strs[k], h, w, c=1)
+	avg_intensity = 0
+	avg_count = 0
+	for r in range(img.shape[0]):
+		for c in range(img.shape[1]):
+			if img[r][c] != 0:
+				avg_intensity = avg_intensity + img[r][c]
+				avg_count = avg_count + 1
+	avg_intensity = avg_intensity/avg_count
+	print("Avg Intensity for Source Temperatures: " + str(avg_intensity))
 	img = np.concatenate((np.zeros((h, w, 1)), img), 2)
 	img = np.concatenate((np.zeros((h, w, 1)), img), 2)
 	img *= 255 # or any coefficient
