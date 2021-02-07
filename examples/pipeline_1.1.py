@@ -91,57 +91,57 @@ def brdf(p_s, w_i, w_o):
 
 # Prevent memory errors from large dimensions
 def adder(a, b):
-	c = []
-	if len(a) != len(b):
-		print("Dimensions invalid.")
-	else:
-		for i in range(len(a)):
-			c.append(a[i] + b[i])
-	return c
+    c = []
+    if len(a) != len(b):
+        print("Dimensions invalid.")
+    else:
+        for i in range(len(a)):
+            c.append(a[i] + b[i])
+    return c
 
 def subter(a, b):
-	c = []
-	if len(a) != len(b):
-		print("Dimensions invalid.")
-	else:
-		for i in range(len(a)):
-			c.append(a[i] - b[i])
-	return c
+    c = []
+    if len(a) != len(b):
+        print("Dimensions invalid.")
+    else:
+        for i in range(len(a)):
+            c.append(a[i] - b[i])
+    return c
 
 def multer(a, b):
-	c = []
-	if len(a) != len(b):
-		print("Dimensions invalid.")
-	else:
-		for i in range(len(a)):
-			c.append(a[i]*b[i])
-	return c
+    c = []
+    if len(a) != len(b):
+        print("Dimensions invalid.")
+    else:
+        for i in range(len(a)):
+            c.append(a[i]*b[i])
+    return c
 
 def divider(a, b):
-	c = []
-	if len(a) != len(b):
-		print("Dimensions invalid.")
-	else:
-		for i in range(len(a)):
-			c.append(a[i]/b[i])
-	return c
+    c = []
+    if len(a) != len(b):
+        print("Dimensions invalid.")
+    else:
+        for i in range(len(a)):
+            c.append(a[i]/b[i])
+    return c
 
 def source_channel_distr(T, channel):
-	#T: temperature in Kelvin
-	#channel: color channel (0/1/2) - (R/G/B)
-	#l: wavelengths: in nm
-	wvs = [400, 410, 420, 430, 440, 450, 460, 470, 480, 490, 500, 510, 520, 530, 540, 550, 560, 570, 580, 590, 600, 610, 620, 630, 640, 650, 660, 670, 680, 690, 700, 710, 720]
-	l = wvs
-	h = 6.626e-34
-	k = 1.381e-23
-	c = 3.0e8 
-	l = [l2*1e-9 for l2 in l]
-	spd = [(8*np.pi*h*c*pow(l2,-5))/(np.exp((h*c)/(k*l2*T))-1) for l2 in l]
-	spd = [spd2/(np.sum(spd)) for spd2 in spd]
-	spd = np.array(spd)
-	spd_ch = spd*sensor_data[channel]
-	wavelength_ch = 10*round(sum(multer((spd_ch/sum(spd_ch)), wvs))/10, 0)
-	return wavelength_ch
+    #T: temperature in Kelvin
+    #channel: color channel (0/1/2) - (R/G/B)
+    #l: wavelengths: in nm
+    wvs = [400, 410, 420, 430, 440, 450, 460, 470, 480, 490, 500, 510, 520, 530, 540, 550, 560, 570, 580, 590, 600, 610, 620, 630, 640, 650, 660, 670, 680, 690, 700, 710, 720]
+    l = wvs
+    h = 6.626e-34
+    k = 1.381e-23
+    c = 3.0e8 
+    l = [l2*1e-9 for l2 in l]
+    spd = [(8*np.pi*h*c*pow(l2,-5))/(np.exp((h*c)/(k*l2*T))-1) for l2 in l]
+    spd = [spd2/(np.sum(spd)) for spd2 in spd]
+    spd = np.array(spd)
+    spd_ch = spd*sensor_data[channel]
+    wavelength_ch = 10*round(sum(multer((spd_ch/sum(spd_ch)), wvs))/10, 0)
+    return wavelength_ch
 
 ##########-----------------skin thickness per vertex functions---------------------##########
 
@@ -290,87 +290,58 @@ with open('extinction_coeff.txt') as f:
        (lmbda, muoxy,mudoxy) = line.split()
        molarExtinctionCoeffOxy[int(lmbda)] = float(muoxy)
        molarExtinctionCoeffDoxy[int(lmbda)] = float(mudoxy)
-       
-def normalize_img(image)
-    return image
 
 def transform_test(vertices, obj, camera, source, temperature, channel, h = 256, w = 256):
-	'''
-	Args:
-		obj: dict contains obj transform paras
-		camera: dict contains camera paras
-	'''
-	R = mesh.transform.angle2matrix(obj['angles'])
-	transformed_vertices = mesh.transform.similarity_transform(vertices, obj['s'], R, obj['t'])
-	vertices = transformed_vertices
+    '''
+    Args:
+        obj: dict contains obj transform paras
+        camera: dict contains camera paras
+    '''
+    R = mesh.transform.angle2matrix(obj['angles'])
+    transformed_vertices = mesh.transform.similarity_transform(vertices, obj['s'], R, obj['t'])
+    vertices = transformed_vertices
 
-	wavelength = source_channel_distr(temperature, channel)
-	
-	#wavelength = 10*round(sum(multer(spd, nm_wavelength))/10, 0)
-	#epi_depth, derm_depth = get_thicknesses(depth_var_vertices, "shape_predictor_68_face_landmarks.dat")		
-	strength_val, angles, normals = compute_strength(wavelength, fblood, fmel, vertices, triangles, source, derm_depth, epi_depth)
-	brdf_val = []
-	for index, value in enumerate(vertices):
-		brdf_val.append(brdf(0.1, vertices[index]-source, camera['eye']-vertices[index]))
-	midpoint = 0.5/np.percentile(brdf_val, 50)
-	brdf_val = np.array(brdf_val).reshape(-1,1)
-	brdf_val = brdf_val*midpoint
-	brdf_val = np.minimum((brdf_val - 1),-0.0000001) + 1
-	strength_val = strength_val*brdf_val
+    wavelength = source_channel_distr(temperature, channel)
+    
+    #wavelength = 10*round(sum(multer(spd, nm_wavelength))/10, 0)
+    #epi_depth, derm_depth = get_thicknesses(depth_var_vertices, "shape_predictor_68_face_landmarks.dat")		
+    strength_val, angles, normals = compute_strength(wavelength, fblood, fmel, vertices, triangles, source, derm_depth, epi_depth)
+    brdf_val = []
+    for index, value in enumerate(vertices):
+        brdf_val.append(brdf(0.1, vertices[index]-source, camera['eye']-vertices[index]))
+    midpoint = 0.5/np.percentile(brdf_val, 50)
+    brdf_val = np.array(brdf_val).reshape(-1,1)
+    brdf_val = brdf_val*midpoint
+    brdf_val = np.minimum((brdf_val - 1),-0.0000001) + 1
+    strength_val = strength_val*brdf_val
 
-
-	print('\n' + "BRDF Values")
-	print(np.percentile(brdf_val, 10))
-	print(np.percentile(brdf_val, 30))
-	print(np.percentile(brdf_val, 50))
-	print(np.percentile(brdf_val, 70))
-	print(np.percentile(brdf_val, 90))
-	
-	
-	if camera['proj_type'] == 'orthographic':
-		projected_vertices = transformed_vertices
-		image_vertices = mesh.transform.to_image(projected_vertices, h, w)
-	else:
-		## world space to camera space. (Look at camera.) 
-		camera_vertices = mesh.transform.lookat_camera(transformed_vertices, camera['eye'], camera['at'], camera['up'])
-		## camera space to image space. (Projection) if orth project, omit
-		projected_vertices = mesh.transform.perspective_project(camera_vertices, camera['fovy'], near = camera['near'], far = camera['far'])
-		## to image coords(position in image)
-		image_vertices = mesh.transform.to_image(projected_vertices, h, w, True)
-	
-    # START HERE
-	rendering = mesh.render.render_colors(image_vertices, triangles, strength_val, h, w, c=3)
-	rendering = np.concatenate((np.zeros((h, w, 1)), rendering), 2)
-	rendering = np.concatenate((np.zeros((h, w, 1)), rendering), 2)
-	rendering = np.minimum((np.maximum(rendering, 0)), 1)
-    rendering = normalize(rendering)
-    smearing_distance = ???
-    for pix_no, pix in enumerate(rendering):
-    #for vertex_no, vertex in enumerate(image_vertices):
-        vertex = pix
-        nearest_vertices = []
-        distances = []
-        for vertex_no2, vertex2 in enumerate(image_vertices):
-            vertex2 = vertex2[:2]
-            distance = math.dist(vertex, vertex2)
-            if (distance < smearing_distance):
-                nearest_vertices.append(vertex2)
-                strengths.append(distance)
-        distances = [smearing_distance - distance for distance in distances]
-        distances = distances/sum(distances)
-        
-        strength_val[vertex_no] = ???
-        for vertex in nearest_vertices:
-            strength_val[vertex_no] = strength_val[vertex_no] + strength_val[vertex]*distances[vertex]
-            
-	#stval = np.concatenate((strength_val, np.zeros_like(strength_val),np.zeros_like(strength_val)),1)
-	#stval = np.concatenate((np.zeros_like(strength_val),stval),1)
-	#CHANGE THE LINE BELOW THIS FROM NORMALS -> ANGLES OR STRENGTH_VAL AS APPROPRIATE
-	#rendering = mesh.render.render_colors(image_vertices, triangles, stval, h, w, c=3)
-	#rendering = np.concatenate((np.zeros((h, w, 1)), rendering), 2)
-	#rendering = np.concatenate((np.zeros((h, w, 1)), rendering), 2)
-	#rendering = np.minimum((np.maximum(rendering, 0)), 1)
-	return strength_val, image_vertices
+    print('\n' + "BRDF Values")
+    print(np.percentile(brdf_val, 10))
+    print(np.percentile(brdf_val, 30))
+    print(np.percentile(brdf_val, 50))
+    print(np.percentile(brdf_val, 70))
+    print(np.percentile(brdf_val, 90))
+    
+    
+    if camera['proj_type'] == 'orthographic':
+        projected_vertices = transformed_vertices
+        image_vertices = mesh.transform.to_image(projected_vertices, h, w)
+    else:
+        ## world space to camera space. (Look at camera.) 
+        camera_vertices = mesh.transform.lookat_camera(transformed_vertices, camera['eye'], camera['at'], camera['up'])
+        ## camera space to image space. (Projection) if orth project, omit
+        projected_vertices = mesh.transform.perspective_project(camera_vertices, camera['fovy'], near = camera['near'], far = camera['far'])
+        ## to image coords(position in image)
+        image_vertices = mesh.transform.to_image(projected_vertices, h, w, True)
+    
+    #stval = np.concatenate((strength_val, np.zeros_like(strength_val),np.zeros_like(strength_val)),1)
+    #stval = np.concatenate((np.zeros_like(strength_val),stval),1)
+    #CHANGE THE LINE BELOW THIS FROM NORMALS -> ANGLES OR STRENGTH_VAL AS APPROPRIATE
+    #rendering = mesh.render.render_colors(image_vertices, triangles, stval, h, w, c=3)
+    #rendering = np.concatenate((np.zeros((h, w, 1)), rendering), 2)
+    #rendering = np.concatenate((np.zeros((h, w, 1)), rendering), 2)
+    #rendering = np.minimum((np.maximum(rendering, 0)), 1)
+    return strength_val, image_vertices
 
 #geometric functions for normal and angle calculation
 def normals_compute(vertices,triangles):
@@ -504,7 +475,7 @@ def compute_strength(lmbda,fblood,fmel,vertices,triangles,s,d_derm,d_epi):
     Tepidermis = computeTepidermis(lmbda,fmel, d_epi)
     b = computeBeta(lmbda,fblood)
     K = computeK(lmbda,fblood)
-	
+    
     direction = vertices-np.reshape(s,(1,-1))
     direction = direction/(np.linalg.norm(direction, ord=2, axis=-1, keepdims=True)+eps)
     
@@ -560,7 +531,8 @@ def calc_mel_haem(colors):
             pos_of_min = [k[0],k[1]]
         fblood.append(0.0007 + 0.0693*(pos_of_min[0]/len(sRGBim)))
         fmel.append(0.0043 + 0.4257*(pos_of_min[1]/len(sRGBim[0])))
-        print(str(100*timer/len(colors)) + "% completed processing")
+        if timer % (len(colors)//3) == 0:
+            print(str(100*timer/len(colors)) + "% completed processing")
         timer = timer + 1
     
     return fblood, fmel
@@ -661,26 +633,95 @@ source = (0,0,200)
 temperature = 6000 # temperature is also a variable parameter (range to be determined)
 channel = 1 #channel can be 0 or 1 or 2 corresponding to (R/G/B) or (B/G/R) - doubt
 
+#------------------------------------------------------------------------
+#Testing for camera spatial positions
+cam_pos_str = []
+cam_verts = []
+render_names = []
+
+source = (0,0,200)
+## 2. fix obj position(center=[0,0,0], front pose). change camera position&direction, using perspective projection(fovy fixed)
+obj['s'] = scale_init
+obj['angles'] = [0, 0, 0]
+obj['t'] = [0, 0, 0]
+# obj: center at [0,0,0]. size:200
+#camera['proj_type'] = 'perspective'
+camera['proj_type'] = 'orthographic'
+camera['at'] = [0, 0, 0]
+camera['near'] = 1000
+camera['far'] = -100
+# eye position
+camera['fovy'] = 30
+camera['up'] = [0, 1, 0] #
+# z-axis: eye from far to near, looking at the center of face
+i = 0
+for p in np.arange(500, 250-1, -20): # 0.5m->0.25m
+    camera['eye'] = [0, 0, p]  # stay in front of face
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    cam_pos_str.append(stv)
+    cam_verts.append(vs) 
+    i = i+1
+    lab = 'cam_pos_x_{:>2d}'.format(p)
+    render_names.append(lab)
+    print(f"i:{i}")
+    
+print("Finished computing strengths")
+# Normalizing all strengths
+h = w = 256
+cam_strs = np.array(cam_pos_str)
+cam_strs = np.nan_to_num(cam_strs)
+cam_strs = cam_strs/np.max(cam_strs)
+cam_sum = np.sum(cam_strs, axis = 1)
+
+sf = 'results/final_results/camera_positions'
+fig_sf = 'results/final_results/figs'
+if not os.path.exists(fig_sf):
+    os.mkdir(fig_sf)
+
+if not os.path.exists(sf):
+    os.mkdir(sf)
+# Rendering the strength results
+for k in range(len(cam_strs)):
+    img = mesh.render.render_colors(cam_verts[k], triangles, cam_strs[k], h, w, c=1)
+    img = np.concatenate((np.zeros((h, w, 1)), img), 2)
+    img = np.concatenate((np.zeros((h, w, 1)), img), 2)
+    img *= 255 # or any coefficient
+    img = img.astype(np.uint8)
+    io.imsave('{}/ortho_{:>2d}_'.format(sf, k) + render_names[k] + '.jpg', img, quality=100)
+print("Finished rendering")
+#Generating and plotting strength sum values for each of the axes
+plot_z_x = np.arange(500,250-1,-20)
+plot_z_y = cam_sum
+plt.figure()
+plt.plot(plot_z_x, plot_z_y) #(z = 50)
+plt.grid(True)
+plt.xlabel("Camera position z-axis values")
+plt.ylabel("Normalised strength sums")
+plt.title("RPPG strengths when varying the Z-axis camera position")
+plt.savefig(f'{fig_sf}/ortho_cam_z.png')
+sys.exit("Finished generating perspective cam z")
+
+
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #Testing for camera eye positions (Orthographic projection only)
 cam_pos_str = []
 cam_verts = []
 render_names = []
-for i,p in enumerate(range(-400, 401, 25)):
+for i,p in enumerate(range(-400, 401, 80)):
     camera['eye'] = [p,0,250]
     stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
     cam_pos_str.append(stv)
     cam_verts.append(vs)
     lab = 'cam_pos_x_{:>2d}'.format(p)
     render_names.append(lab)
-for i,p in enumerate(range(-400, 401, 25)):
+for i,p in enumerate(range(-400, 401, 80)):
     camera['eye'] = [0,p,250]
     stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
     cam_pos_str.append(stv)
     cam_verts.append(vs)
     lab = 'cam_pos_y_{:>2d}'.format(p)
     render_names.append(lab)
-for i,p in enumerate(range(-100, 701, 25)):
+for i,p in enumerate(range(-100, 701, 80)):
     camera['eye'] = [0,0,p]
     stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
     cam_pos_str.append(stv)
@@ -700,20 +741,20 @@ if not os.path.exists(sf):
     os.mkdir(sf)
 # Rendering the strength results
 for k in range(len(cam_strs)):
-	img = mesh.render.render_colors(cam_verts[k], triangles, cam_strs[k], h, w, c=1)
-	img = np.concatenate((np.zeros((h, w, 1)), img), 2)
-	img = np.concatenate((np.zeros((h, w, 1)), img), 2)
-	img *= 255 # or any coefficient
-	img = img.astype(np.uint8)
-	io.imsave('{}/{:>2d}_'.format(sf, k) + render_names[k] + '.jpg', img, quality=100)
+    img = mesh.render.render_colors(cam_verts[k], triangles, cam_strs[k], h, w, c=1)
+    img = np.concatenate((np.zeros((h, w, 1)), img), 2)
+    img = np.concatenate((np.zeros((h, w, 1)), img), 2)
+    img *= 255 # or any coefficient
+    img = img.astype(np.uint8)
+    io.imsave('{}/{:>2d}_'.format(sf, k) + render_names[k] + '.jpg', img, quality=100)
 
 #Generating and plotting strength sum values for each of the axes
-plot_x_x = np.array(range(-400,401,25))
-plot_x_y = cam_sum[0:33,0]
-plot_y_x = np.array(range(-400,-201,25))
-plot_y_y = cam_sum[33:41,0]
-plot_z_x = np.array(range(-100,701,25))
-plot_z_y = cam_sum[66:99,0]
+plot_x_x = np.array(range(-400,401,80))
+plot_x_y = cam_sum[0:11,0]
+plot_y_x = np.array(range(-400,401,80))
+plot_y_y = cam_sum[11:22,0]
+plot_z_x = np.array(range(-100,701,80))
+plot_z_y = cam_sum[22:33,0]
 plt.plot(plot_x_x, plot_x_y) #(x = 200)
 plt.grid(True)
 plt.plot(plot_y_x, plot_y_y) #(y = -325)
@@ -723,10 +764,10 @@ plt.grid(True)
 
 camera['eye'] = [200,-325,50]
 stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
-cam_pos_str[99] = stv
-cam_verts[99] = vs
+cam_pos_str[32] = stv
+cam_verts[32] = vs
 
-img = mesh.render.render_colors(cam_verts[99], triangles, cam_strs[99], h, w, c=1)
+img = mesh.render.render_colors(cam_verts[32], triangles, cam_strs[32], h, w, c=1)
 img = np.concatenate((np.zeros((h, w, 1)), img), 2)
 img = np.concatenate((np.zeros((h, w, 1)), img), 2)
 img *= 255 # or any coefficient
@@ -739,21 +780,21 @@ camera['eye'] = [200,-325,50] # Best camera eye location determined
 light_pos_str = []
 light_verts = []
 render_names_light = []
-for i,p in enumerate(range(-400, 401, 25)):
+for i,p in enumerate(range(-400, 401, 80)):
     source = (p,0,200)
     stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
     light_pos_str.append(stv)
     light_verts.append(vs)
     lab = 'light_x_{:>2d}'.format(p)
     render_names_light.append(lab)
-for i,p in enumerate(range(-400, 401, 25)):
+for i,p in enumerate(range(-400, 401, 80)):
     source = (0,p,200)
     stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
     light_pos_str.append(stv)
     light_verts.append(vs)
     lab = 'light_y_{:>2d}'.format(p)
     render_names_light.append(lab)
-for i,p in enumerate(range(-100, 701, 25)):
+for i,p in enumerate(range(-100, 701, 80)):
     source = (0,0,p)
     stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
     light_pos_str.append(stv)
@@ -773,20 +814,20 @@ if not os.path.exists(sf):
     os.mkdir(sf)
 # Rendering the strength results
 for k in range(len(light_strs)):
-	img = mesh.render.render_colors(light_verts[k], triangles, light_strs[k], h, w, c=1)
-	img = np.concatenate((np.zeros((h, w, 1)), img), 2)
-	img = np.concatenate((np.zeros((h, w, 1)), img), 2)
-	img *= 255 # or any coefficient
-	img = img.astype(np.uint8)
-	io.imsave('{}/{:>2d}_'.format(sf, k) + render_names_light[k] + '.jpg', img, quality=100)
+    img = mesh.render.render_colors(light_verts[k], triangles, light_strs[k], h, w, c=1)
+    img = np.concatenate((np.zeros((h, w, 1)), img), 2)
+    img = np.concatenate((np.zeros((h, w, 1)), img), 2)
+    img *= 255 # or any coefficient
+    img = img.astype(np.uint8)
+    io.imsave('{}/{:>2d}_'.format(sf, k) + render_names_light[k] + '.jpg', img, quality=100)
 
 #Generating and plotting strength sum values for each of the axes
-plot_x_x = np.array(range(-400,401,25))
-plot_x_y = light_sum[0:33,0]
-plot_y_x = np.array(range(-400,401,25))
-plot_y_y = light_sum[33:66,0]
-plot_z_x = np.array(range(-100,701,25))
-plot_z_y = light_sum[66:99,0]
+plot_x_x = np.array(range(-400,401,80))
+plot_x_y = light_sum[0:11,0]
+plot_y_x = np.array(range(-400,401,80))
+plot_y_y = light_sum[11:22,0]
+plot_z_x = np.array(range(-100,701,80))
+plot_z_y = light_sum[22:33,0]
 plt.plot(plot_x_x, plot_x_y) #(x = 0)
 plt.grid(True)
 plt.plot(plot_y_x, plot_y_y) #(y = -100)
@@ -802,19 +843,19 @@ light_strs = np.array(light_pos_str)
 light_strs = np.nan_to_num(light_strs)
 light_strs = light_strs/np.max(light_strs)
 light_sum = np.sum(light_strs, axis = 1)
-img = mesh.render.render_colors(light_verts[99], triangles, light_strs[99], h, w, c=1)
+img = mesh.render.render_colors(light_verts[32], triangles, light_strs[32], h, w, c=1)
 img = np.concatenate((np.zeros((h, w, 1)), img), 2)
 img = np.concatenate((np.zeros((h, w, 1)), img), 2)
 img *= 255 # or any coefficient
 img = img.astype(np.uint8)
-
+print("")
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #Testing for source temperature values (Orthographic projection only)
 source = (0,-100,700) # Best source position determined
 temp_str = []
 temp_verts = []
 render_names_temp = []
-for i,p in enumerate(range(250, 10250, 250)):
+for i,p in enumerate(range(250, 10250, 1000)):
     temperature = p
     stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
     temp_str.append(stv)
@@ -834,16 +875,16 @@ if not os.path.exists(sf):
     os.mkdir(sf)
 # Rendering the strength results
 for k in range(len(temp_strs)):
-	img = mesh.render.render_colors(temp_verts[k], triangles, temp_strs[k], h, w, c=1)
-	img = np.concatenate((np.zeros((h, w, 1)), img), 2)
-	img = np.concatenate((np.zeros((h, w, 1)), img), 2)
-	img *= 255 # or any coefficient
-	img = img.astype(np.uint8)
-	io.imsave('{}/{:>2d}_'.format(sf, k) + render_names_temp[k] + '.jpg', img, quality=100)
+    img = mesh.render.render_colors(temp_verts[k], triangles, temp_strs[k], h, w, c=1)
+    img = np.concatenate((np.zeros((h, w, 1)), img), 2)
+    img = np.concatenate((np.zeros((h, w, 1)), img), 2)
+    img *= 255 # or any coefficient
+    img = img.astype(np.uint8)
+    io.imsave('{}/{:>2d}_'.format(sf, k) + render_names_temp[k] + '.jpg', img, quality=100)
 
 #Generating and plotting strength sum values for each of the axes
-plot_x_x = np.array(range(250,10250,250))
-plot_x_y = temp_sum[0:40,0]
+plot_x_x = np.array(range(250,10250,1000))
+plot_x_y = temp_sum[0:10,0]
 plt.plot(plot_x_x, plot_x_y) #(x = 0)
 plt.grid(True)
 

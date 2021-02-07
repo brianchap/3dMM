@@ -1,0 +1,52 @@
+from matplotlib import pyplot as plt
+import numpy as np
+import scipy.io as sio
+
+
+def multer(a, b):
+    c = []
+    if len(a) != len(b):
+        print("Dimensions invalid.")
+    else:
+        for i in range(len(a)):
+            c.append(a[i]*b[i])
+    return c
+
+def scd(T, channel):
+    cam_filename = 'cam_sens.mat'
+    cam_data = sio.loadmat(cam_filename)
+    sensor_data = cam_data['S']
+
+    #T: temperature in Kelvin
+    #channel: color channel (0/1/2) - (R/G/B)
+    #l: wavelengths: in nm
+    global wvs
+    wvs = [400, 410, 420, 430, 440, 450, 460, 470, 480, 490, 500, 510, 520, 530, 540, 550, 560, 570, 580, 590, 600, 610, 620, 630, 640, 650, 660, 670, 680, 690, 700, 710, 720]
+    l = wvs
+    h = 6.626e-34
+    k = 1.381e-23
+    c = 3.0e8 
+    l = [l2*1e-9 for l2 in l]
+    spd = [(8*np.pi*h*c*pow(l2,-5))/(np.exp((h*c)/(k*l2*T))-1) for l2 in l]
+    spd = [spd2/(np.sum(spd)) for spd2 in spd]
+    spd = np.array(spd)
+    spd_ch = spd*sensor_data[channel]
+    wavelength_ch = 10*round(sum(multer((spd_ch/sum(spd_ch)), wvs))/10, 0)
+    return (spd_ch/sum(spd_ch)), wavelength_ch
+
+def main():
+    wchs = []
+    for i in range(250, 10000, 1000):
+        waves_1, wch = scd(i, 1)
+        wchs.append(wch)
+        print(f"waves_1:{waves_1}")
+        plt.plot(wvs, waves_1, label=f"temp={i}")
+    plt.legend()
+    plt.title("Temperature wavelength distributions")
+    plt.figure()
+    plt.plot([i for i in range(250, 10000, 1000)], wchs)
+    plt.title("wavelength_ch values for various temps")
+    plt.show()
+
+if __name__ == "__main__":
+    main()
