@@ -1,0 +1,90 @@
+def calc_mel_haem2(colors):
+    fblood = []
+    fmel = []
+    timer = 1
+    for color in colors:
+        k = 1
+        diff = 0
+        pos_of_min = [0, 0]
+        min_diff = 10e30
+        i1 = np.square(sRGBim[:,:,0] - color[0])
+        i2 = np.square(sRGBim[:,:,1] - color[1])
+        i3 = np.square(sRGBim[:,:,2] - color[2])
+        diff = np.sqrt(i1+i2+i3)
+        mini = np.min(diff)
+        k = np.unravel_index(np.argmin(diff, axis=None), diff.shape)
+        if mini < min_diff:
+            pos_of_min = [k[0],k[1]]
+        fblood.append((0.68399*(pos_of_min[0]/len(sRGBim[:,0])))**3)
+        fmel.append((0.79370*(pos_of_min[1]/len(sRGBim[0])))**3)
+        print(str(100*timer/len(colors)) + "% completed processing")
+        timer = timer + 1
+    
+    return fblood, fmel, pos_of_min
+
+def haar_faces(img, haar_classifier):
+    # Detect faces using classifier.
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    faces = haar_classifier.detectMultiScale(img, 1.1, 2)
+    
+    # Find the maximum face
+    maxface = None
+    max_face = -1
+    for face in faces:
+        if max_face < face[2] * face[3]:
+            maxface = face
+    return maxface
+
+# Crop the image face out
+def crop_face(img, face):
+    newimg = img[face[1]:face[1]+face[3], face[0]:face[0]+face[2]]   
+    return newimg
+ 
+def crop_face_zoom(img, face):
+    newimg = img[face[1] + int(0.05 * face[3]):face[1] + int(0.95 *face[3]),
+                 face[0] + int(0.1*face[2]) : face[0] + int(0.90*face[2])]       
+    return newimg
+
+# Display the image
+def display_image(image, name):
+    cv2.namedWindow(name)
+    cv2.imshow(name, image)
+    if (cv2.waitKey(5000) & 0xEFFFFF):
+        cv2.destroyWindow(name)
+        print('Completed displaying')
+    return
+
+orig_img = cv2.imread('Sample6.jpg')
+haar_classifier = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
+fo = haar_faces(orig_img, haar_classifier)
+cropped = crop_face(orig_img,fo)
+display_image(cropped, 'cropped') # display face in input image
+frame = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB)
+
+frame_r = np.mean(frame[:,:,0])
+frame_g = np.mean(frame[:,:,1])
+frame_b = np.mean(frame[:,:,2])
+frame2 = np.zeros((191,191,3))
+frame2[:,:,0] = int(frame_r)
+frame2[:,:,1] = int(frame_g)
+frame2[:,:,2] = int(frame_b)
+frame2 = frame2.astype(int)
+plt.imshow(frame2) # shade detected from the input image
+
+new_mel = plt.imread('mel_map_2.jpg') # melanin map from Jiminez et.al.
+new_mel = new_mel/256
+#srgb2 = sRGBim
+#sRGBim = srgb2
+sRGBim = new_mel
+
+frame_r = np.mean(frame[:,:,0])/256
+frame_g = np.mean(frame[:,:,1])/256
+frame_b = np.mean(frame[:,:,2])/256
+shade = np.array([[frame_r,frame_g,frame_b]])
+fb,fm, pom = calc_mel_haem2(shade)
+
+frame3 = np.zeros((191,191,3))
+frame3[:,:,0] = sRGBim[pom[0],pom[1],0]
+frame3[:,:,1] = sRGBim[pom[0],pom[1],1]
+frame3[:,:,2] = sRGBim[pom[0],pom[1],2]
+plt.imshow(frame3) # shade estimated from the melanin/haemoglobin map
