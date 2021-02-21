@@ -422,7 +422,8 @@ def computeDR_Dbeta2(lmbda,fblood,d):
   expnt = multer(K, d)
   dr = subter(multer([pow((1 + g),2) for g in b], [np.exp(f) for f in expnt]), multer([pow((1 - h),2) for h in b], [np.exp(-1*e) for e in expnt]))
   trm2 = [1/m for m in dr]
-  nr = subter(multer([(pow(n,2) -1)*(1 + 1/n) for n in b], [np.exp(o) for o in expnt]), multer([(1 - 1/p) for p in b], [np.exp(-1*q) for q in expnt]))
+  nr = subter(multer([(pow(n,2) -1)*(1 + 1/n) for n in b], [np.exp(o) for o in expnt]), multer([(pow(p,2) -1)*(1 - 1/p) for p in b], [np.exp(-1*q) for q in expnt]))
+  #nr = subter(multer([(pow(n,2) -1)*(1 + 1/n) for n in b], [np.exp(o) for o in expnt]), multer([(1 - 1/p) for p in b], [np.exp(-1*q) for q in expnt]))
   trm1 = divider(nr, [pow(r,2) for r in dr])
   return multer((subter(trm1, trm2)), [subter(np.exp(s), np.exp(-1*s)) for s in expnt])
 
