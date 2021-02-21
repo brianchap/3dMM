@@ -157,9 +157,6 @@ def get_wos(wo):
 
 def main():
     return
-    ret = brdf(1, [0, 0, 1], [0, 0, 1], [0, 1, 1])
-    print(f"brdf:{ret}")
-    sys.exit(0)
     # debug: finding vertex index for features in face
     img = np.zeros((1024, 1024,3))
     mat_fname = "Data/BFM/Out/BFM_info.mat"
@@ -169,12 +166,10 @@ def main():
     print(f"0th:{ft_inds[0], }")
     for i, ind in enumerate(ft_inds):
         vert = uv_translate[int(ind)]
-        org = (int(vert[1]*1024),int(vert[0]*1024))
+        org = (int(vert[0]*1024),1024-int(vert[1]*1024))
         img = cv.putText(img, str(i), org, cv.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), thickness=1, bottomLeftOrigin=False)
         img[org[1]][org[0]] = [255,255,255]
-    vert = uv_translate[5324]
-    vert = (int(vert[1]*1024), int(vert[0]*1024))
-    img = cv.circle(img, vert, 15, (0, 255, 255), 10)
+
     cv.imshow("Test image", img)
     cv.waitKey(0)
     cv.destroyAllWindows()
@@ -307,98 +302,110 @@ def find_mid(shape, i1, i2, frac):
     x2, y2 = shape[i2-1]
     xo = x1 + (x2-x1)*frac
     yo = y1 + (y2-y1)*frac
-    return [int(xo), int(yo)]
+    # NOTE THAT THIS WAS PREVIOUSLY CAST TO INT IN THE DLIB VERSION
+    return [xo, yo]
 
 # Takes in the 3DMM vertices (properly aligned to the input image), as well as the path to the face landmark pre-traines detector, and...
 # Outputs: a thickness value for every single vertex in the vertices array
 def get_thicknesses(vertices, path_model, image_file):
+    mat_fname = "Data/BFM/Out/BFM_info.mat"
+    model_info = sio.loadmat(mat_fname)
+    shape = model_info['model_info']['kpt_ind'][0][0][0]
+    uv_translate = model_info['model_info']['uv_coords'][0][0]
+    xyshape = np.zeros((len(shape), 2))
+    for i, elem in enumerate(shape):
+        xyshape[i] = uv_translate[int(elem)]
+    shape = xyshape
     epi_depth, derm_depth = contruct_mapping()
 
+    ## UNCOMMENT THE NEXT FEW LINES IF YOU WANT dlib LANDMARK DETECTION
     # initialize dlib's face detector (HOG-based) and then create
     # the facial landmark predictor
-    detector = dlib.get_frontal_face_detector()
-    predictor = dlib.shape_predictor(path_model)
+    # detector = dlib.get_frontal_face_detector()
+    # predictor = dlib.shape_predictor(path_model)
 
     # load the input image, resize it, and convert it to grayscale
     image = cv.imread(image_file)
     #image = imutils.resize(image, width=500)
     gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
     # detect faces in the grayscale image
-    rects = detector(gray, 1)
+    #rects = detector(gray, 1)
     # loop over the face detections
-    rect = rects[0]
-    shape = predictor(gray, rect)
-    shape = shape_to_np(shape)
+    #rect = rects[0]
+    #shape = predictor(gray, rect)
+    #shape = shape_to_np(shape)
     shape = shape[:60]
 
     # Add new points to dict and face landmarks: epidermis
-    for i1, i2, frac in [[30, 2, 1/2], [4, 31, 1/4], [49, 6, 1/2], [58, 9, 1/2], [55, 12, 1/2], [14, 31, 1/4], [30, 16, 1/2], [31, 4, 1/4], [30, 3, 1/5], [29, 2, 1/6], [31, 14, 1/4], [30, 15, 1/5], [29, 16, 1/6]]:
+    edepths = [1.37, 1.7, 1.3, 1.54, 1.3, 1.7, 1.37, 2.56, 2.59, 2.3, 2.56, 2.59, 2.3, 1.37, 1.37]
+    ddepths = [1.55, 1.51, 1.38, 1.53, 1.38, 1.51, 1.55, 1.74, 1.58, 1.64, 1.74, 1.58, 1.64, 1.55, 1.55]
+    for index, [i1, i2, frac] in enumerate([[30, 2, 1/2], [4, 31, 1/2], [49, 6, 1/2], [58, 9, 1/2], [55, 12, 1/2], [14, 31, 1/2], [30, 16, 1/2], [31, 4, 1/13], [30, 3, 1/14], [29, 2, 1/14], [31, 14, 1/14], [30, 15, 1/14], [29, 16, 1/15], [30, 15, 1/3], [30, 3, 1/3]]):
         x1, y1 = find_mid(shape, i1, i2, frac)
         shape = np.append(shape, [[x1, y1]], axis=0)
-        for e_depth in [1.37, 1.7, 1.3, 1.54, 1.3, 1.7, 1.37, 2.56, 2.59, 2.3, 2.56, 2.59, 2.3]:
-            epi_depth[len(shape)] = e_depth*29.57/10000
-        for d_depth in [1.55, 1.51, 1.38, 1.53, 1.38, 1.51, 1.55, 1.74, 1.58, 1.64, 1.74, 1.58, 1.64]:
-            derm_depth[len(shape)] = d_depth*758.85/10000
-
-    #print(f"len shape:{len(shape)}, len dict:{len(derm_depth)}")
-
+        #for e_depth in [1.37, 1.7, 1.3, 1.54, 1.3, 1.7, 1.37, 2.56, 2.59, 2.3, 2.56, 2.59, 2.3]:
+        e_depth = edepths[index]
+        epi_depth[len(shape)] = e_depth*29.57/10000
+        #for d_depth in [1.55, 1.51, 1.38, 1.53, 1.38, 1.51, 1.55, 1.74, 1.58, 1.64, 1.74, 1.58, 1.64]:
+        d_depth = ddepths[index]
+        derm_depth[len(shape)] = d_depth*758.85/10000
+    
     # convert dlib's rectangle to a Opencv-style bounding box
     # [i.e., (x, y, w, h)], then draw the face bounding box
-    (x, y, w, h) = rect_to_bb(rect)
-    cv.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
-    # show the face number
-    cv.putText(image, "Face #1", (x - 10, y - 10),
-               cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    # (x, y, w, h) = rect_to_bb(rect)
+    # cv.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    # # show the face number
+    # cv.putText(image, "Face #1", (x - 10, y - 10),
+    #            cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-    # loop over the (x, y)-coordinates for the facial landmarks
-    # and draw them on the image
-    for j, (x, y) in enumerate(shape):
-        cv.circle(image, (x, y), 2, (0, 0, 255), -1)
+    # # loop over the (x, y)-coordinates for the facial landmarks
+    # # and draw them on the image
+    # for j, (x, y) in enumerate(shape):
+    #     cv.circle(image, (x, y), 2, (0, 0, 255), -1)
 
     # show the output image with the face detections + facial landmarks
-    #cv.imshow("Output", image)
-    #cv.waitKey(0)
-
+    # cv.imshow("Output", image)
+    # cv.waitKey(0)
+    # cv.destroyAllWindows()
     epi_skin_depth = np.zeros(len(vertices))
     derm_skin_depth = np.zeros(len(vertices))
 
     for i, vert in enumerate(vertices):
-        vert = vert.astype(int)
-        cv.circle(image, (vert[0], vert[1]), 5, (0, 255), -1)
+        #vert = vert.astype(int)
+        vert = uv_translate[i]
+        #cv.circle(image, (vert[0], vert[1]), 5, (0, 255, 0), -1)
         closest = [-1, float('inf')]
-        vec_closest = [-1, float('inf')]
+        sec_closest = [-1, float('inf')]
         for j, (x, y) in enumerate(shape):
-             euc_dist = np.sqrt((x - vert[:2][0])**2 + (y - vert[:2][1])**2)
-             #euc_dist = math.dist([x,y], vert[:2])
-             min_closest = min(closest[1], euc_dist)
-
-             if min_closest != closest[1]:
-                  sec_closest = closest.copy()
-                  closest = [j+1, min_closest]
-             else:
-                  min_closest = min(sec_closest[1], euc_dist)
-                  sec_closest = [j+1, min_closest]
+            #euc_dist = np.sqrt((x - vert[:2][0])**2 + (y - vert[:2][1])**2)
+            euc_dist = np.sqrt((x - vert[0])**2 + (y - vert[1])**2)
+            #euc_dist = math.dist([x,y], vert[:2])
+            min_closest = min(closest[1], euc_dist)
+            # if its the current distance is not the closest feature overall
+            if min_closest == euc_dist:
+                sec_closest = closest.copy()
+                closest = [j+1, min_closest]
+            else:
+                min_closest = min(sec_closest[1], euc_dist)
+                if min_closest == euc_dist:
+                    sec_closest = [j+1, min_closest]
         tot_clos = closest[1]+sec_closest[1]
 
         # NOTE: Arbitrary weightage of closest and second closest thickness, based on distance of other.
         # Eg. if closest is 1 away and second closest is 4 away, the weight of the closer thickness is 4/5 (and the other weight is 1/5).
         epi_weight_avg = (epi_depth[closest[0]]*sec_closest[1]/tot_clos) + (epi_depth[sec_closest[0]]*closest[1]/tot_clos)
         derm_weight_avg = (derm_depth[closest[0]]*sec_closest[1]/tot_clos) + (derm_depth[sec_closest[0]]*closest[1]/tot_clos)
-
-        epi_skin_depth[i] = epi_weight_avg #, closest[0], sec_closest[0], vert])
-        derm_skin_depth[i] = derm_weight_avg #, closest[0], sec_closest[0], vert])
+        epi_skin_depth[i] = epi_weight_avg 
+        derm_skin_depth[i] = derm_weight_avg
 
     sum_d = 0
     for key in derm_depth:
         sum_d += derm_depth[key]
     sum_d /= len(derm_depth)
-    #print(f"average dermdepth:{sum_d}")
 
     sum_e = 0
     for key in epi_depth:
         sum_e += epi_depth[key]
     sum_e /= len(epi_depth)
-    #print(f"average epidepth:{sum_e}")
     return np.array(epi_skin_depth), np.array(derm_skin_depth)
 
 molarExtinctionCoeffOxy = {}
@@ -410,7 +417,10 @@ with open('extinction_coeff.txt') as f:
        molarExtinctionCoeffOxy[int(lmbda)] = float(muoxy)
        molarExtinctionCoeffDoxy[int(lmbda)] = float(mudoxy)
 
-def transform_test(vertices, obj, camera, source, temperature, channel, h = 256, w = 256):
+def transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm, h = 256, w = 256):
+    inp_epi_depth = iepi
+    inp_derm_depth = iderm
+    
     '''
     Args:
         obj: dict contains obj transform paras
@@ -425,7 +435,8 @@ def transform_test(vertices, obj, camera, source, temperature, channel, h = 256,
     #wavelength = 10*round(sum(multer(spd, nm_wavelength))/10, 0)
     #epi_depth, derm_depth = get_thicknesses(depth_var_vertices, "shape_predictor_68_face_landmarks.dat")		
     strength_val, angles, normals = compute_strength(wavelength, fblood, fmel, vertices, triangles, source, inp_derm_depth, inp_epi_depth)
-    
+    strength_val = np.array(strength_val)
+
     # NOTE: that all these other arrays (other than brdf_val) can be removed from the code. They are just there solely for debugging purposes.
     brdf_val = []
     fres_val = []
@@ -439,12 +450,8 @@ def transform_test(vertices, obj, camera, source, temperature, channel, h = 256,
     for index, value in enumerate(vertices):
         norm_i = normals[index]
         norm_i /= np.linalg.norm(norm_i)
-        #print(f"norm_i:{norm_i}")
         wo = normalize(camera['eye'])
         wi = normalize(np.array(source))
-        if index == 0:
-            print(f"wo:{wo},wi:{wi}")
-            print(f"vertex:{vertices[index]}, cam:{normalize(camera['eye']- vertices[index])}, source:{normalize(np.array(source)-vertices[index])}, norm:{-1*np.array(norm_i)}")
         tot_brdf = []
         wos = get_wos(camera['eye'] - vertices[index])
         for wo in wos:
@@ -473,7 +480,7 @@ def transform_test(vertices, obj, camera, source, temperature, channel, h = 256,
     print(f"CSQRVALUES:{prt_some(csqr_val)}")
 
     brdf_val = np.array(brdf_val)
-    strength_val = np.array(strength_val)
+
     max_ind = np.argmax(brdf_val)
     print(f"max brdf index:{np.argmax(brdf_val)}, max:{np.amax(brdf_val)}=?{brdf_val[max_ind]}, max's denom:{denom_val[max_ind]}, fres:{fres_val[max_ind]}, numer:{numer_val[max_ind]}, gval:{g_val[max_ind]}, dval:{d_val[max_ind]}, vertices:{vertices[max_ind]}, surface_norm:{normals[max_ind]}")
     
@@ -493,7 +500,7 @@ def transform_test(vertices, obj, camera, source, temperature, channel, h = 256,
     print(np.percentile(brdf_val, 50))
     print(np.percentile(brdf_val, 70))
     print(np.percentile(brdf_val, 90))
-    
+
     if camera['proj_type'] == 'orthographic':
         projected_vertices = transformed_vertices
         image_vertices = mesh.transform.to_image(projected_vertices, h, w)
@@ -504,8 +511,8 @@ def transform_test(vertices, obj, camera, source, temperature, channel, h = 256,
         projected_vertices = mesh.transform.perspective_project(camera_vertices, camera['fovy'], near = camera['near'], far = camera['far'])
         ## to image coords(position in image)
         image_vertices = mesh.transform.to_image(projected_vertices, h, w, True)
-
-    return strength_val, image_vertices
+    print(f"strength_val and epidepth shapes::{np.shape(strength_val)}, {np.shape(inp_epi_depth)}")
+    return strength_val, image_vertices, inp_epi_depth
 
 #geometric functions for normal and angle calculation
 def normals_compute(vertices,triangles):
@@ -791,7 +798,8 @@ d_t[1] = len(orig_img[0]) - t[1]
 global inp_epi_depth, inp_derm_depth
 depth_var_vertices = bfm.transform(vertices, d_s, d_angles2, d_t)
 inp_epi_depth, inp_derm_depth = get_thicknesses(depth_var_vertices, "shape_predictor_68_face_landmarks.dat",image_file)
-
+iepi = inp_epi_depth
+iderm = inp_derm_depth
 transformed_vertices = bfm.transform(vertices, s, angles2, t)
 transformed_vertices = transformed_vertices - np.mean(transformed_vertices, 0)[np.newaxis, :]
 vertices = transformed_vertices
@@ -829,21 +837,24 @@ cam_verts = []
 render_names = []
 # y-axis: eye from down to up, looking at the center of face
 
-for p in np.arange(-300, 301, 60): # up 0.3m -> down 0.3m
-#for p in np.arange(0, 10, 10):
+#for p in np.arange(-300, 301, 60): # up 0.3m -> down 0.3m
+for p in np.arange(0, 10, 10):
     camera['eye'] = [0, p, 250] # stay 0.25m far
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs, other_stv = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
     cam_pos_str.append(stv)
+    cam_pos_str.append(other_stv)
+    cam_verts.append(vs)
     cam_verts.append(vs)
     lab = 'cp_y_{:.2f}'.format(p/6)
     render_names.append(lab)
+    render_names.append(lab)
 
-
+"""
 # z-axis: eye from far to near, looking at the center of face
 
 for p in np.arange(500, 250-1, -40): # 0.5m->0.25m
     camera['eye'] = [0, 0, p]  # stay in front of face
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
     cam_pos_str.append(stv)
     cam_verts.append(vs)
     lab = 'cp_z_{:>2d}'.format(1000-p)
@@ -853,7 +864,7 @@ for p in np.arange(500, 250-1, -40): # 0.5m->0.25m
 
 for p in np.arange(-300, 301, 60): # left 0.3m -> right 0.3m
     camera['eye'] = [p, 0, 250] # stay 0.25m far
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
     cam_pos_str.append(stv)
     cam_verts.append(vs)
     lab = 'cp_x_{:.2f}'.format(-p/6)
@@ -872,16 +883,18 @@ for p in np.arange(-50, 51, 10):
     # note that: rotating up direction is opposite to rotating obj
     # just imagine: rotating camera 20 degree clockwise, is equal to keeping camera fixed and rotating obj 20 degree anticlockwise.
     camera['up'] = np.squeeze(up)
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
     cam_pos_str.append(stv)
     cam_verts.append(vs)
     lab = 'cp_up_{:>2d}'.format(-p)
     render_names.append(lab)
 
 plt.show()
+"""
 cam_strs = np.array(cam_pos_str)
 cam_strs = np.nan_to_num(cam_strs)
-
+print(f"cam strs len:{len(cam_strs)}, dimensions:{np.shape(cam_strs)}")
+"""
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -912,21 +925,21 @@ light_verts = []
 render_names_light = []
 for i,p in enumerate(range(-400, 401, 25)):
     source = (p,0,200)
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
     light_pos_str.append(stv)
     light_verts.append(vs)
     lab = 'lit_x_{:>2d}'.format(p)
     render_names_light.append(lab)
 for i,p in enumerate(range(-400, 401, 25)):
     source = (0,p,200)
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
     light_pos_str.append(stv)
     light_verts.append(vs)
     lab = 'lit_y_{:>2d}'.format(p)
     render_names_light.append(lab)
 for i,p in enumerate(range(-100, 701, 25)):
     source = (0,0,p)
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
     light_pos_str.append(stv)
     light_verts.append(vs)
     lab = 'lit_z_{:>2d}'.format(p)
@@ -963,7 +976,7 @@ temp_verts = []
 render_names_temp = []
 for i,p in enumerate(range(250, 10250, 250)):
     temperature = p
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
     temp_str.append(stv)
     temp_verts.append(vs)
     lab = 'temp_{:>2d}'.format(p)
@@ -1006,7 +1019,7 @@ for i in range(3):
         obj['angles'] = [0, 0, 0]
         obj['angles'][i] = angle
         obj['t'] = [0, 0, 0]
-        stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+        stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
         objang_str.append(stv)
         objang_verts.append(vs)    
         lab = 'ang_{:>2d}_{:>2d}'.format(i,angle)
@@ -1054,7 +1067,7 @@ for factor in np.arange(low,(high+inc),inc):
     k1 = baseline * factor
     k1 = np.minimum(k1,0.43)
     fmel = k1
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
     art_mel_str.append(stv)
     art_mel_ver.append(vs)	
     lab = 'mel_sc_{:.2f}'.format(factor)
@@ -1105,7 +1118,7 @@ for i in range(3):
         k1 = baseline * factor
         k1 = np.minimum(k1,0.43)
         fmel = k1
-        stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+        stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
         chan_str.append(stv)
         chan_ver.append(vs)	
         lab = 'chan_{:>2d}_mel_{:.2f}'.format(i,factor)
@@ -1113,7 +1126,7 @@ for i in range(3):
 
 chan_strs = np.array(chan_str)
 chan_strs = np.nan_to_num(chan_strs)
-
+"""
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # GLOBAL NORMALISATION CODE
@@ -1124,18 +1137,19 @@ chan_strs = np.nan_to_num(chan_strs)
 #obj = 33
 #amel = 21
 #chan = 21
-
+#UNCOMMENT LINE BELOW. IT IS COMMENTED FOR DEBUGGING
 #all_strs = np.concatenate((cam_strs,light_strs,temp_strs,obj_strs,amel_strs,chan_strs))
 all_strs = cam_strs
 all_strs = all_strs/np.max(all_strs)
-""
+cam_strs = all_strs
+"""
 cam_strs = all_strs[0:40,:,:]
 light_strs = all_strs[40:139,:,:]
 temp_strs = all_strs[139:179,:,:]
 obj_strs = all_strs[179:212,:,:]
 amel_strs = all_strs[212:233,:,:]
 chan_strs = all_strs[233:254,:,:]
-""
+"""
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 #***************************************
@@ -1162,7 +1176,7 @@ for k in range(len(cam_strs)):
     plt.text(128, 245, render_names[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
     plt.savefig('{}/{:>2d}_'.format(sf, k) + render_names[k] + '.jpg')
 plt.show()
-
+"""
 #0.663064
 #***************************************
 # Rendering the source position results
@@ -1288,7 +1302,7 @@ for k in range(len(chan_strs)):
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #TODO : continue the code from here
-
+"""
 #1 - Camera positions
 #Generating and plotting strength sum values for each of the axes
 plot_z_x = np.array(range(500,220,-40))
