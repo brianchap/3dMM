@@ -13,11 +13,11 @@ from IntensityPreprocessing import sRGB_generation
 sys.path.append('..')
 import face3d
 from face3d import mesh
-import cv2
+import cv2 as cv
 import dlib
 import numpy as np
 import scipy.io as sio
-
+import sys
 # width of beckmann microfacet distribution
 beck_width = 0.35
 # Refractive index of the material the light is coming from
@@ -25,45 +25,89 @@ eta_i = 1
 # Refractive index of the material the light is hitting/entering
 eta_t = 1.45
 
+def prt_some(arr):
+    print(f"f10:{arr[:10]},L10:{arr[-10:]}, max, min:{max(arr)}, {min(arr)}")
+    return "printing"
+
+def normalize(arr):
+    return arr/np.linalg.norm(arr)
+
 # Microfacet distribution function
-def distr(w_h):
-    if w_h[2] == 0:
-        return 0
+# NOTE: theta_m is a debugging parameter, and can be removed (along with its corresponding if-else)
+def distr(w_h, n, theta_m=float('-inf')):
+    if theta_m == float('-inf'):
+        cos_wh = np.dot(w_h, n)
+    else:
+        cos_wh = np.cos(theta_m)
+    #return 1, 0, 0
     
-    sin_theta_sqr = max(0, 1 - w_h[2]*w_h[2])
-    cos_theta_sqr = w_h[2] * w_h[2]
+    #cos_wh = np.cos(theta_m)
+    if cos_wh <= 0:
+        return 0, float('-inf'), float('-inf')
+    cos_theta_sqr = cos_wh ** 2
+    sin_theta_sqr = 1 - cos_theta_sqr
+
     cos_theta_4 = pow(cos_theta_sqr, 2)
     tan_sqr = sin_theta_sqr/cos_theta_sqr
+
     width_sqr = pow(beck_width, 2)
-    return np.exp(-tan_sqr/width_sqr)/(math.pi * width_sqr * cos_theta_4)
+    return np.exp(-tan_sqr/width_sqr)/(math.pi * width_sqr * cos_theta_4), sin_theta_sqr, cos_theta_sqr
+
 
 # Monodirectional shadowing helper function
-def monodir_shadowing(v, w_h):
-    cos_sqr = w_h[2] * w_h[2]
+def monodir_shadowing(v, w_h, n):
+    #return 1
+    cos_sqr = np.dot(v, n)
     sin_sqr = max(0, 1 - cos_sqr)
-    a = 1 / (beck_width * abs(np.sqrt(sin_sqr / cos_sqr)))
+    if np.dot(v, w_h) <= 0 or np.dot(v, n) <= 0:
+        return 0
+    else:
+        a = 1 / (beck_width * abs(np.sqrt(sin_sqr / cos_sqr)))
     if a < 1.6:
         a_sqr = a * a
-        return (3.535 * a + 2.181 * a_sqr)/(1 + 2.276 * a-2.577 * a_sqr)
+        return (3.535 * a + 2.181 * a_sqr)/(1 + 2.276 * a + 2.577 * a_sqr)
     else:
         return 1
 
 # Geometry function (using monodirectional shadowing function)
-def geom(w_i, w_o, w_h):
+def geom(w_i, w_o, w_h, n):
     ret = 1
     for w in [w_i, w_o]:
-        ret *= monodir_shadowing(w, w_h)
+        ret *= monodir_shadowing(w, w_h, n)
     return ret
         
 # Dielectric fresnel coefficients helper function
 def dielectric(ci, ct, ei, et):
     r_par = (et * ci - ei * ct)/(et * ci + ei * ct)
     r_perp = (ei * ci - et * ct)/(ei * ci + et * ct)
-    return [0.5 * (r_par * r_par + r_perp * r_perp) for i in range(4)]
+    return 0.5 * (r_par * r_par + r_perp * r_perp)
     
-# Fresnel reflectance function for dielectrics (skin?)
+# Alternate (equivalent) implementation of Fresnel reflectance function
+"""
+def fres_orig(cos_i):
+    #return 1
+    ci = min(1, cos_i)
+    ci = max(-1, cos_i)
+    if ci <= 0:
+        ei, et = eta_t, eta_i
+    else:
+        ei, et = eta_i, eta_t
+    sin_t = ei/et*np.sqrt(max(0, 1-ci*ci))
+    if sin_t >= 1:
+        return 1
+    else:
+        ct = np.sqrt(max(0, 1 - sin_t * sin_t))
+        return dielectric(abs(ci), ct, ei, et)
+"""
+
+# Fresnel reflectance function for dielectrics (skin)
 def fres(cos_i):
-    g = np.sqrt((eta_t**2)/(eta_i**2) - 1 + cos_i**2)
+    #return 1
+    g = (eta_t**2)/(eta_i**2) - 1 + cos_i**2
+    if g <= 0:
+        return 1
+    
+    g = np.sqrt(g)
     cos_i = abs(cos_i)
     first_term = 0.5 * ((g - cos_i)**2)/((g + cos_i)**2)
     second_term = 1 + (((cos_i * (g + cos_i) - 1)**2)/((cos_i * (g - cos_i) + 1)**2))
@@ -76,72 +120,142 @@ def fres(cos_i):
 # w_i, w_o ... These are 2 3d vectors that represent the incoming and outgoing lighting directions
 # Outputs:
 # Returns the torrance-sparrow brdf value
-def brdf(p_s, w_i, w_o):
-    cos_to = abs(w_o[2])
-    cos_ti = abs(w_i[2])
-    # TODO: implement edge cases for inputs
+def brdf(p_s, w_i, w_o, n):
+    n = n/np.linalg.norm(n)
+    w_i = w_i/np.linalg.norm(w_i)
+    w_o = w_o/np.linalg.norm(w_o)
+    cos_to = np.abs(np.dot(w_o, n))
+    cos_ti = np.abs(np.dot(w_i, n))
+    if cos_to == 0 or cos_ti == 0:
+        return 1, float('-inf'), float('-inf'), float('-inf'), float('-inf'), float('-inf'), float('-inf'), float('-inf')
     
     w_h = w_i + w_o
     # Normalize w_h
+    if np.linalg.norm(w_h) == 0:
+        return 1, float('-inf'), float('-inf'), float('-inf'), float('-inf'), float('-inf'), float('-inf'), float('-inf')
     norm_wh = w_h / np.linalg.norm(w_h)
+
+    #f = fres_orig(np.dot(w_i, norm_wh))
     f = fres(np.dot(w_i, norm_wh))
-    g = geom(w_i, w_o, norm_wh)
-    d = distr(norm_wh)
-    return (f*p_s*g*d)/(4*cos_to*cos_ti)
+
+    g = geom(w_i, w_o, norm_wh, n)
+    d, ssqr, csqr = distr(norm_wh, n)
+    numer = p_s * g * d
+    denom = 4*cos_to*cos_ti
+    return (f*p_s*g*d)/(4*cos_to*cos_ti), f, numer, denom, g, d, ssqr, csqr
+
+# This function takes in an outgoing vector (camera vector) and returns a list of 10 vectors that are representative of its corresponding hemisphere.
+def get_wos(wo):
+    wo = normalize(wo)
+    if wo[2] != 1:
+        cross = [0,0,1]
+    else:
+        cross = [0,1,0]
+    perp1 = normalize(np.cross(cross, wo))
+    perp2 = normalize(np.cross(perp1, wo))
+    return [wo, normalize(wo + perp1), normalize(wo - perp1), normalize(wo + perp2), normalize(wo - perp2), perp1, perp2, -perp1, -perp2]
+
+def main():
+    return
+    # debug: finding vertex index for features in face
+    img = np.zeros((1024, 1024,3))
+    mat_fname = "Data/BFM/Out/BFM_info.mat"
+    model_info = sio.loadmat(mat_fname)
+    ft_inds = model_info['model_info']['kpt_ind'][0][0][0]
+    uv_translate = model_info['model_info']['uv_coords'][0][0]
+    print(f"0th:{ft_inds[0], }")
+    for i, ind in enumerate(ft_inds):
+        vert = uv_translate[int(ind)]
+        org = (int(vert[0]*1024),1024-int(vert[1]*1024))
+        img = cv.putText(img, str(i), org, cv.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), thickness=1, bottomLeftOrigin=False)
+        img[org[1]][org[0]] = [255,255,255]
+
+    cv.imshow("Test image", img)
+    cv.waitKey(0)
+    cv.destroyAllWindows()
+    sys.exit(0)
+    
+    # debug: testing distr function
+    thetas = [i for i in np.arange(0,1,0.01)]
+
+    w_h = [[0, 100, i]/np.linalg.norm([0,100,i]) for i in range(0, 400)]
+    n = [0,100,200]/np.linalg.norm([0,100,200])
+    theta_m = [360/(2*math.pi)*np.arccos(np.dot(m, np.array(n))) for m in w_h]
+    ds = [distr(m, n)[0] for m in w_h]
+    ind = np.argsort(theta_m)
+    theta_m = np.array(theta_m)[ind]
+    ds = np.array(ds)[ind]
+    #print(f"tehtas:{theta_m}, ds:{ds}")
+    plt.figure()
+    plt.plot(theta_m, ds)
+    plt.show()
+    sleep(15)
+
+    avg_n = -1*normalize([0.000235705369, 0.169941049, -0.311750788])
+    p = 1
+    wo = np.array([ 0.45950168, -0.86151332,  0.21599305])
+    wi = np.array([ 0.61903806, -0.51387378,  0.59390708])
+    print(np.arccos(np.dot(normalize(wo+wi), avg_n)))
+    print(f"ret:{brdf(p, wi, wo, avg_n)}")
+    sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+
 
 # Prevent memory errors from large dimensions
 def adder(a, b):
-	c = []
-	if len(a) != len(b):
-		print("Dimensions invalid.")
-	else:
-		for i in range(len(a)):
-			c.append(a[i] + b[i])
-	return c
+    c = []
+    if len(a) != len(b):
+        print("Dimensions invalid.")
+    else:
+        for i in range(len(a)):
+            c.append(a[i] + b[i])
+    return c
 
 def subter(a, b):
-	c = []
-	if len(a) != len(b):
-		print("Dimensions invalid.")
-	else:
-		for i in range(len(a)):
-			c.append(a[i] - b[i])
-	return c
+    c = []
+    if len(a) != len(b):
+        print("Dimensions invalid.")
+    else:
+        for i in range(len(a)):
+            c.append(a[i] - b[i])
+    return c
 
 def multer(a, b):
-	c = []
-	if len(a) != len(b):
-		print("Dimensions invalid.")
-	else:
-		for i in range(len(a)):
-			c.append(a[i]*b[i])
-	return c
+    c = []
+    if len(a) != len(b):
+        print("Dimensions invalid.")
+    else:
+        for i in range(len(a)):
+            c.append(a[i]*b[i])
+    return c
 
 def divider(a, b):
-	c = []
-	if len(a) != len(b):
-		print("Dimensions invalid.")
-	else:
-		for i in range(len(a)):
-			c.append(a[i]/b[i])
-	return c
+    c = []
+    if len(a) != len(b):
+        print("Dimensions invalid.")
+    else:
+        for i in range(len(a)):
+            c.append(a[i]/b[i])
+    return c
 
 def source_channel_distr(T, channel):
-	#T: temperature in Kelvin
-	#channel: color channel (0/1/2) - (R/G/B)
-	#l: wavelengths: in nm
-	wvs = [400, 410, 420, 430, 440, 450, 460, 470, 480, 490, 500, 510, 520, 530, 540, 550, 560, 570, 580, 590, 600, 610, 620, 630, 640, 650, 660, 670, 680, 690, 700, 710, 720]
-	l = wvs
-	h = 6.626e-34
-	k = 1.381e-23
-	c = 3.0e8 
-	l = [l2*1e-9 for l2 in l]
-	spd = [(8*np.pi*h*c*pow(l2,-5))/(np.exp((h*c)/(k*l2*T))-1) for l2 in l]
-	spd = [spd2/(np.sum(spd)) for spd2 in spd]
-	spd = np.array(spd)
-	spd_ch = spd*sensor_data[channel]
-	wavelength_ch = 10*round(sum(multer((spd_ch/sum(spd_ch)), wvs))/10, 0)
-	return wavelength_ch
+    #T: temperature in Kelvin
+    #channel: color channel (0/1/2) - (R/G/B)
+    #l: wavelengths: in nm
+    wvs = [400, 410, 420, 430, 440, 450, 460, 470, 480, 490, 500, 510, 520, 530, 540, 550, 560, 570, 580, 590, 600, 610, 620, 630, 640, 650, 660, 670, 680, 690, 700, 710, 720]
+    l = wvs
+    h = 6.626e-34
+    k = 1.381e-23
+    c = 3.0e8 
+    l = [l2*1e-9 for l2 in l]
+    spd = [(8*np.pi*h*c*pow(l2,-5))/(np.exp((h*c)/(k*l2*T))-1) for l2 in l]
+    spd = [spd2/(np.sum(spd)) for spd2 in spd]
+    spd = np.array(spd)
+    spd_ch = spd*sensor_data[channel]
+    wavelength_ch = 10*round(sum(multer((spd_ch/sum(spd_ch)), wvs))/10, 0)
+    return wavelength_ch
 
 ##########-----------------skin thickness per vertex functions---------------------##########
 
@@ -149,7 +263,7 @@ def source_channel_distr(T, channel):
 def rect_to_bb(rect):
     # take a bounding predicted by dlib and convert it
     # to the format (x, y, w, h) as we would normally do
-    # with Opencv2
+    # with Opencv
     x = rect.left()
     y = rect.top()
     w = rect.right() - x
@@ -188,98 +302,110 @@ def find_mid(shape, i1, i2, frac):
     x2, y2 = shape[i2-1]
     xo = x1 + (x2-x1)*frac
     yo = y1 + (y2-y1)*frac
-    return [int(xo), int(yo)]
+    # NOTE THAT THIS WAS PREVIOUSLY CAST TO INT IN THE DLIB VERSION
+    return [xo, yo]
 
 # Takes in the 3DMM vertices (properly aligned to the input image), as well as the path to the face landmark pre-traines detector, and...
 # Outputs: a thickness value for every single vertex in the vertices array
 def get_thicknesses(vertices, path_model, image_file):
+    mat_fname = "Data/BFM/Out/BFM_info.mat"
+    model_info = sio.loadmat(mat_fname)
+    shape = model_info['model_info']['kpt_ind'][0][0][0]
+    uv_translate = model_info['model_info']['uv_coords'][0][0]
+    xyshape = np.zeros((len(shape), 2))
+    for i, elem in enumerate(shape):
+        xyshape[i] = uv_translate[int(elem)]
+    shape = xyshape
     epi_depth, derm_depth = contruct_mapping()
 
+    ## UNCOMMENT THE NEXT FEW LINES IF YOU WANT dlib LANDMARK DETECTION
     # initialize dlib's face detector (HOG-based) and then create
     # the facial landmark predictor
-    detector = dlib.get_frontal_face_detector()
-    predictor = dlib.shape_predictor(path_model)
+    # detector = dlib.get_frontal_face_detector()
+    # predictor = dlib.shape_predictor(path_model)
 
     # load the input image, resize it, and convert it to grayscale
-    image = cv2.imread(image_file)
+    image = cv.imread(image_file)
     #image = imutils.resize(image, width=500)
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
     # detect faces in the grayscale image
-    rects = detector(gray, 1)
+    #rects = detector(gray, 1)
     # loop over the face detections
-    rect = rects[0]
-    shape = predictor(gray, rect)
-    shape = shape_to_np(shape)
+    #rect = rects[0]
+    #shape = predictor(gray, rect)
+    #shape = shape_to_np(shape)
     shape = shape[:60]
 
     # Add new points to dict and face landmarks: epidermis
-    for i1, i2, frac in [[30, 2, 1/2], [4, 31, 1/4], [49, 6, 1/2], [58, 9, 1/2], [55, 12, 1/2], [14, 31, 1/4], [30, 16, 1/2], [31, 4, 1/4], [30, 3, 1/5], [29, 2, 1/6], [31, 14, 1/4], [30, 15, 1/5], [29, 16, 1/6]]:
+    edepths = [1.37, 1.7, 1.3, 1.54, 1.3, 1.7, 1.37, 2.56, 2.59, 2.3, 2.56, 2.59, 2.3, 1.37, 1.37]
+    ddepths = [1.55, 1.51, 1.38, 1.53, 1.38, 1.51, 1.55, 1.74, 1.58, 1.64, 1.74, 1.58, 1.64, 1.55, 1.55]
+    for index, [i1, i2, frac] in enumerate([[30, 2, 1/2], [4, 31, 1/2], [49, 6, 1/2], [58, 9, 1/2], [55, 12, 1/2], [14, 31, 1/2], [30, 16, 1/2], [31, 4, 1/13], [30, 3, 1/14], [29, 2, 1/14], [31, 14, 1/14], [30, 15, 1/14], [29, 16, 1/15], [30, 15, 1/3], [30, 3, 1/3]]):
         x1, y1 = find_mid(shape, i1, i2, frac)
         shape = np.append(shape, [[x1, y1]], axis=0)
-        for e_depth in [1.37, 1.7, 1.3, 1.54, 1.3, 1.7, 1.37, 2.56, 2.59, 2.3, 2.56, 2.59, 2.3]:
-            epi_depth[len(shape)] = e_depth*29.57/10000
-        for d_depth in [1.55, 1.51, 1.38, 1.53, 1.38, 1.51, 1.55, 1.74, 1.58, 1.64, 1.74, 1.58, 1.64]:
-            derm_depth[len(shape)] = d_depth*758.85/10000
-
-    #print(f"len shape:{len(shape)}, len dict:{len(derm_depth)}")
-
-    # convert dlib's rectangle to a Opencv2-style bounding box
+        #for e_depth in [1.37, 1.7, 1.3, 1.54, 1.3, 1.7, 1.37, 2.56, 2.59, 2.3, 2.56, 2.59, 2.3]:
+        e_depth = edepths[index]
+        epi_depth[len(shape)] = e_depth*29.57/10000
+        #for d_depth in [1.55, 1.51, 1.38, 1.53, 1.38, 1.51, 1.55, 1.74, 1.58, 1.64, 1.74, 1.58, 1.64]:
+        d_depth = ddepths[index]
+        derm_depth[len(shape)] = d_depth*758.85/10000
+    
+    # convert dlib's rectangle to a Opencv-style bounding box
     # [i.e., (x, y, w, h)], then draw the face bounding box
-    (x, y, w, h) = rect_to_bb(rect)
-    cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
-    # show the face number
-    cv2.putText(image, "Face #1", (x - 10, y - 10),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    # (x, y, w, h) = rect_to_bb(rect)
+    # cv.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    # # show the face number
+    # cv.putText(image, "Face #1", (x - 10, y - 10),
+    #            cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-    # loop over the (x, y)-coordinates for the facial landmarks
-    # and draw them on the image
-    for j, (x, y) in enumerate(shape):
-        cv2.circle(image, (x, y), 2, (0, 0, 255), -1)
+    # # loop over the (x, y)-coordinates for the facial landmarks
+    # # and draw them on the image
+    # for j, (x, y) in enumerate(shape):
+    #     cv.circle(image, (x, y), 2, (0, 0, 255), -1)
 
     # show the output image with the face detections + facial landmarks
-    #cv2.imshow("Output", image)
-    #cv2.waitKey(0)
-
+    # cv.imshow("Output", image)
+    # cv.waitKey(0)
+    # cv.destroyAllWindows()
     epi_skin_depth = np.zeros(len(vertices))
     derm_skin_depth = np.zeros(len(vertices))
 
     for i, vert in enumerate(vertices):
-        vert = vert.astype(int)
-        cv2.circle(image, (vert[0], vert[1]), 5, (0, 255), -1)
+        #vert = vert.astype(int)
+        vert = uv_translate[i]
+        #cv.circle(image, (vert[0], vert[1]), 5, (0, 255, 0), -1)
         closest = [-1, float('inf')]
-        vec_closest = [-1, float('inf')]
+        sec_closest = [-1, float('inf')]
         for j, (x, y) in enumerate(shape):
-             euc_dist = np.sqrt((x - vert[:2][0])**2 + (y - vert[:2][1])**2)
-             #euc_dist = math.dist([x,y], vert[:2])
-             min_closest = min(closest[1], euc_dist)
-
-             if min_closest != closest[1]:
-                  sec_closest = closest.copy()
-                  closest = [j+1, min_closest]
-             else:
-                  min_closest = min(sec_closest[1], euc_dist)
-                  sec_closest = [j+1, min_closest]
+            #euc_dist = np.sqrt((x - vert[:2][0])**2 + (y - vert[:2][1])**2)
+            euc_dist = np.sqrt((x - vert[0])**2 + (y - vert[1])**2)
+            #euc_dist = math.dist([x,y], vert[:2])
+            min_closest = min(closest[1], euc_dist)
+            # if its the current distance is not the closest feature overall
+            if min_closest == euc_dist:
+                sec_closest = closest.copy()
+                closest = [j+1, min_closest]
+            else:
+                min_closest = min(sec_closest[1], euc_dist)
+                if min_closest == euc_dist:
+                    sec_closest = [j+1, min_closest]
         tot_clos = closest[1]+sec_closest[1]
 
         # NOTE: Arbitrary weightage of closest and second closest thickness, based on distance of other.
         # Eg. if closest is 1 away and second closest is 4 away, the weight of the closer thickness is 4/5 (and the other weight is 1/5).
         epi_weight_avg = (epi_depth[closest[0]]*sec_closest[1]/tot_clos) + (epi_depth[sec_closest[0]]*closest[1]/tot_clos)
         derm_weight_avg = (derm_depth[closest[0]]*sec_closest[1]/tot_clos) + (derm_depth[sec_closest[0]]*closest[1]/tot_clos)
-
-        epi_skin_depth[i] = epi_weight_avg #, closest[0], sec_closest[0], vert])
-        derm_skin_depth[i] = derm_weight_avg #, closest[0], sec_closest[0], vert])
+        epi_skin_depth[i] = epi_weight_avg 
+        derm_skin_depth[i] = derm_weight_avg
 
     sum_d = 0
     for key in derm_depth:
         sum_d += derm_depth[key]
     sum_d /= len(derm_depth)
-    #print(f"average dermdepth:{sum_d}")
 
     sum_e = 0
     for key in epi_depth:
         sum_e += epi_depth[key]
     sum_e /= len(epi_depth)
-    #print(f"average epidepth:{sum_e}")
     return np.array(epi_skin_depth), np.array(derm_skin_depth)
 
 molarExtinctionCoeffOxy = {}
@@ -291,51 +417,102 @@ with open('extinction_coeff.txt') as f:
        molarExtinctionCoeffOxy[int(lmbda)] = float(muoxy)
        molarExtinctionCoeffDoxy[int(lmbda)] = float(mudoxy)
 
-def transform_test(vertices, obj, camera, source, temperature, channel, h = 256, w = 256):
-	'''
-	Args:
-		obj: dict contains obj transform paras
-		camera: dict contains camera paras
-	'''
-	R = mesh.transform.angle2matrix(obj['angles'])
-	transformed_vertices = mesh.transform.similarity_transform(vertices, obj['s'], R, obj['t'])
-	vertices = transformed_vertices
+def transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm, h = 256, w = 256):
+    inp_epi_depth = iepi
+    inp_derm_depth = iderm
+    
+    '''
+    Args:
+        obj: dict contains obj transform paras
+        camera: dict contains camera paras
+    '''
+    R = mesh.transform.angle2matrix(obj['angles'])
+    transformed_vertices = mesh.transform.similarity_transform(vertices, obj['s'], R, obj['t'])
+    vertices = transformed_vertices
 
-	wavelength = source_channel_distr(temperature, channel)
-	
-	#wavelength = 10*round(sum(multer(spd, nm_wavelength))/10, 0)
-	#epi_depth, derm_depth = get_thicknesses(depth_var_vertices, "shape_predictor_68_face_landmarks.dat")		
-	strength_val, angles, normals = compute_strength(wavelength, fblood, fmel, vertices, triangles, source, derm_depth, epi_depth)
-	brdf_val = []
-	for index, value in enumerate(vertices):
-		brdf_val.append(brdf(0.1, vertices[index]-source, camera['eye']-vertices[index]))
-	midpoint = 0.5/np.percentile(brdf_val, 50)
-	brdf_val = np.array(brdf_val).reshape(-1,1)
-	brdf_val = brdf_val*midpoint
-	brdf_val = np.minimum((brdf_val - 1),-0.0000001) + 1
-	strength_val = strength_val*brdf_val
+    wavelength = source_channel_distr(temperature, channel)
+    
+    #wavelength = 10*round(sum(multer(spd, nm_wavelength))/10, 0)
+    #epi_depth, derm_depth = get_thicknesses(depth_var_vertices, "shape_predictor_68_face_landmarks.dat")		
+    strength_val, angles, normals = compute_strength(wavelength, fblood, fmel, vertices, triangles, source, inp_derm_depth, inp_epi_depth)
+    strength_val = np.array(strength_val)
 
+    # NOTE: that all these other arrays (other than brdf_val) can be removed from the code. They are just there solely for debugging purposes.
+    brdf_val = []
+    fres_val = []
+    numer_val = []
+    denom_val = []
+    g_val = []
+    d_val = []
+    ssqr_val = []
+    csqr_val = []
+    man_ds = []
+    for index, value in enumerate(vertices):
+        norm_i = normals[index]
+        norm_i /= np.linalg.norm(norm_i)
+        wo = normalize(camera['eye'])
+        wi = normalize(np.array(source))
+        tot_brdf = []
+        wos = get_wos(camera['eye'] - vertices[index])
+        for wo in wos:
+            brdf_out = brdf(0.1, source - vertices[index], wo, -1*np.array(norm_i))
+            if tot_brdf == []:
+                tot_brdf = [elem/len(wos) for elem in brdf_out]
+            else:
+                tot_brdf = [tot_brdf[i] + brdf_out[i]/len(wos) for i in range(len(brdf_out))]
+        curr_brdf, curr_fres, curr_numer, curr_denom, curr_g, curr_d, curr_ssqr, curr_csqr = tot_brdf
+        brdf_val.append(curr_brdf)
+        fres_val.append(curr_fres)
+        numer_val.append(curr_numer)
+        denom_val.append(curr_denom)
+        g_val.append(curr_g)
+        d_val.append(curr_d)
+        ssqr_val.append(curr_ssqr)
+        csqr_val.append(curr_csqr)
+        
+    print(f"BRDFVALUES:{prt_some(brdf_val)}")
+    print(f"FRESVALUES:{prt_some(fres_val)}")
+    print(f"NUMERVALUES:{prt_some(numer_val)}")
+    print(f"DENOMVALUES:{prt_some(denom_val)}")
+    print(f"GVALUES:{prt_some(g_val)}")
+    print(f"DVALUES:{prt_some(d_val)}")
+    print(f"SSQRVALUES:{prt_some(ssqr_val)}")
+    print(f"CSQRVALUES:{prt_some(csqr_val)}")
 
-	print('\n' + "BRDF Values")
-	print(np.percentile(brdf_val, 10))
-	print(np.percentile(brdf_val, 30))
-	print(np.percentile(brdf_val, 50))
-	print(np.percentile(brdf_val, 70))
-	print(np.percentile(brdf_val, 90))
-	
-	
-	if camera['proj_type'] == 'orthographic':
-		projected_vertices = transformed_vertices
-		image_vertices = mesh.transform.to_image(projected_vertices, h, w)
-	else:
-		## world space to camera space. (Look at camera.) 
-		camera_vertices = mesh.transform.lookat_camera(transformed_vertices, camera['eye'], camera['at'], camera['up'])
-		## camera space to image space. (Projection) if orth project, omit
-		projected_vertices = mesh.transform.perspective_project(camera_vertices, camera['fovy'], near = camera['near'], far = camera['far'])
-		## to image coords(position in image)
-		image_vertices = mesh.transform.to_image(projected_vertices, h, w, True)
-	
-	return strength_val, image_vertices
+    brdf_val = np.array(brdf_val)
+
+    max_ind = np.argmax(brdf_val)
+    print(f"max brdf index:{np.argmax(brdf_val)}, max:{np.amax(brdf_val)}=?{brdf_val[max_ind]}, max's denom:{denom_val[max_ind]}, fres:{fres_val[max_ind]}, numer:{numer_val[max_ind]}, gval:{g_val[max_ind]}, dval:{d_val[max_ind]}, vertices:{vertices[max_ind]}, surface_norm:{normals[max_ind]}")
+    
+    #midpoint = 0.9/np.percentile(brdf_val, 90)
+    brdf_val = np.array(brdf_val).reshape(-1,1)
+    #brdf_val = brdf_val*midpoint
+    #brdf_val = np.minimum((brdf_val - 1),-0.0000001) + 1
+    #brdf_val = brdf_val/np.percentile(brdf_val, 100)
+    brdf_val = brdf_val/np.amax(brdf_val)
+    strength_val = strength_val*brdf_val
+    brdf_val = np.array(brdf_val).reshape(-1,1)
+
+    print('\n' + "BRDF Values")
+    prt_some(brdf_val)
+    print(np.percentile(brdf_val, 10))
+    print(np.percentile(brdf_val, 30))
+    print(np.percentile(brdf_val, 50))
+    print(np.percentile(brdf_val, 70))
+    print(np.percentile(brdf_val, 90))
+
+    if camera['proj_type'] == 'orthographic':
+        projected_vertices = transformed_vertices
+        image_vertices = mesh.transform.to_image(projected_vertices, h, w)
+    else:
+        ## world space to camera space. (Look at camera.) 
+        camera_vertices = mesh.transform.lookat_camera(transformed_vertices, camera['eye'], camera['at'], camera['up'])
+        ## camera space to image space. (Projection) if orth project, omit
+        projected_vertices = mesh.transform.perspective_project(camera_vertices, camera['fovy'], near = camera['near'], far = camera['far'])
+        ## to image coords(position in image)
+        image_vertices = mesh.transform.to_image(projected_vertices, h, w, True)
+    print(f"strength_val and epidepth shapes::{np.shape(strength_val)}, {np.shape(inp_epi_depth)}")
+    return strength_val, image_vertices, inp_epi_depth
 
 #geometric functions for normal and angle calculation
 def normals_compute(vertices,triangles):
@@ -468,7 +645,7 @@ def compute_strength(lmbda,fblood,fmel,vertices,triangles,s,d_derm,d_epi):
     Tepidermis = computeTepidermis(lmbda,fmel, d_epi)
     b = computeBeta(lmbda,fblood)
     K = computeK(lmbda,fblood)
-	
+    
     direction = vertices-np.reshape(s,(1,-1))
     direction = direction/(np.linalg.norm(direction, ord=2, axis=-1, keepdims=True)+eps)
     
@@ -520,7 +697,8 @@ def calc_mel_haem(colors):
             pos_of_min = [k[0],k[1]]
         fblood.append(0.0007 + 0.0693*(pos_of_min[0]/len(sRGBim)))
         fmel.append(0.0043 + 0.4257*(pos_of_min[1]/len(sRGBim[0])))
-        print(str(100*timer/len(colors)) + "% completed processing")
+        if timer%(len(colors)//3) == 0:
+            print(str(100*timer/len(colors)) + "% completed processing")
         timer = timer + 1
     
     return fblood, fmel
@@ -599,7 +777,7 @@ image_filename[0] = 'Sample6.jpg'
 
 mat_data = mata_data[0]
 image_file = image_filename[0]
-orig_img = cv2.imread(image_file)
+orig_img = cv.imread(image_file)
 
 sp = mat_data['Shape_Para']
 ep = mat_data['Exp_Para']
@@ -617,10 +795,11 @@ t = pp[0, 3:6]
 d_t = t.copy()
 d_t[1] = len(orig_img[0]) - t[1]
 
-global epi_depth, derm_depth
+global inp_epi_depth, inp_derm_depth
 depth_var_vertices = bfm.transform(vertices, d_s, d_angles2, d_t)
-epi_depth, derm_depth = get_thicknesses(depth_var_vertices, "shape_predictor_68_face_landmarks.dat",image_file)
-
+inp_epi_depth, inp_derm_depth = get_thicknesses(depth_var_vertices, "shape_predictor_68_face_landmarks.dat",image_file)
+iepi = inp_epi_depth
+iderm = inp_derm_depth
 transformed_vertices = bfm.transform(vertices, s, angles2, t)
 transformed_vertices = transformed_vertices - np.mean(transformed_vertices, 0)[np.newaxis, :]
 vertices = transformed_vertices
@@ -656,58 +835,66 @@ camera['up'] = [0, 1, 0] #
 cam_pos_str = []
 cam_verts = []
 render_names = []
+# y-axis: eye from down to up, looking at the center of face
+
+#for p in np.arange(-300, 301, 60): # up 0.3m -> down 0.3m
+for p in np.arange(0, 10, 10):
+    camera['eye'] = [0, p, 250] # stay 0.25m far
+    stv, vs, other_stv = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
+    cam_pos_str.append(stv)
+    cam_pos_str.append(other_stv)
+    cam_verts.append(vs)
+    cam_verts.append(vs)
+    lab = 'cp_y_{:.2f}'.format(p/6)
+    render_names.append(lab)
+    render_names.append(lab)
+
+"""
 # z-axis: eye from far to near, looking at the center of face
 
 for p in np.arange(500, 250-1, -40): # 0.5m->0.25m
-	camera['eye'] = [0, 0, p]  # stay in front of face
-	stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
-	cam_pos_str.append(stv)
-	cam_verts.append(vs)
-	lab = 'cp_z_{:>2d}'.format(1000-p)
-	render_names.append(lab)
-
-# y-axis: eye from down to up, looking at the center of face
-
-for p in np.arange(-300, 301, 60): # up 0.3m -> down 0.3m
-	camera['eye'] = [0, p, 250] # stay 0.25m far
-	stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
-	cam_pos_str.append(stv)
-	cam_verts.append(vs)
-	lab = 'cp_y_{:.2f}'.format(p/6)
-	render_names.append(lab)
+    camera['eye'] = [0, 0, p]  # stay in front of face
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
+    cam_pos_str.append(stv)
+    cam_verts.append(vs)
+    lab = 'cp_z_{:>2d}'.format(1000-p)
+    render_names.append(lab)
 
 # x-axis: eye from left to right, looking at the center of face
 
 for p in np.arange(-300, 301, 60): # left 0.3m -> right 0.3m
-	camera['eye'] = [p, 0, 250] # stay 0.25m far
-	stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
-	cam_pos_str.append(stv)
-	cam_verts.append(vs)
-	lab = 'cp_x_{:.2f}'.format(-p/6)
-	render_names.append(lab)
+    camera['eye'] = [p, 0, 250] # stay 0.25m far
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
+    cam_pos_str.append(stv)
+    cam_verts.append(vs)
+    lab = 'cp_x_{:.2f}'.format(-p/6)
+    render_names.append(lab)
 
 # up direction
 
 camera['eye'] = [0, 0, 250] # stay in front
 for p in np.arange(-50, 51, 10):
-	world_up = np.array([0, 1, 0]) # default direction
-	z = np.deg2rad(p)
-	Rz=np.array([[math.cos(z), -math.sin(z), 0],
+    world_up = np.array([0, 1, 0]) # default direction
+    z = np.deg2rad(p)
+    Rz=np.array([[math.cos(z), -math.sin(z), 0],
                  [math.sin(z),  math.cos(z), 0],
                  [     0,       0, 1]])
-	up = Rz.dot(world_up[:, np.newaxis]) # rotate up direction
-	# note that: rotating up direction is opposite to rotating obj
-	# just imagine: rotating camera 20 degree clockwise, is equal to keeping camera fixed and rotating obj 20 degree anticlockwise.
-	camera['up'] = np.squeeze(up)
-	stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
-	cam_pos_str.append(stv)
-	cam_verts.append(vs)
-	lab = 'cp_up_{:>2d}'.format(-p)
-	render_names.append(lab)
+    up = Rz.dot(world_up[:, np.newaxis]) # rotate up direction
+    # note that: rotating up direction is opposite to rotating obj
+    # just imagine: rotating camera 20 degree clockwise, is equal to keeping camera fixed and rotating obj 20 degree anticlockwise.
+    camera['up'] = np.squeeze(up)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
+    cam_pos_str.append(stv)
+    cam_verts.append(vs)
+    lab = 'cp_up_{:>2d}'.format(-p)
+    render_names.append(lab)
 
+plt.show()
+"""
 cam_strs = np.array(cam_pos_str)
 cam_strs = np.nan_to_num(cam_strs)
-
+print(f"cam strs len:{len(cam_strs)}, dimensions:{np.shape(cam_strs)}")
+"""
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -738,21 +925,21 @@ light_verts = []
 render_names_light = []
 for i,p in enumerate(range(-400, 401, 25)):
     source = (p,0,200)
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
     light_pos_str.append(stv)
     light_verts.append(vs)
     lab = 'lit_x_{:>2d}'.format(p)
     render_names_light.append(lab)
 for i,p in enumerate(range(-400, 401, 25)):
     source = (0,p,200)
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
     light_pos_str.append(stv)
     light_verts.append(vs)
     lab = 'lit_y_{:>2d}'.format(p)
     render_names_light.append(lab)
 for i,p in enumerate(range(-100, 701, 25)):
     source = (0,0,p)
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
     light_pos_str.append(stv)
     light_verts.append(vs)
     lab = 'lit_z_{:>2d}'.format(p)
@@ -789,7 +976,7 @@ temp_verts = []
 render_names_temp = []
 for i,p in enumerate(range(250, 10250, 250)):
     temperature = p
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
     temp_str.append(stv)
     temp_verts.append(vs)
     lab = 'temp_{:>2d}'.format(p)
@@ -827,16 +1014,16 @@ objang_verts = []
 render_names_objang = []
 
 for i in range(3):
-	for angle in np.arange(-50, 51, 10):
-		obj['s'] = scale_init
-		obj['angles'] = [0, 0, 0]
-		obj['angles'][i] = angle
-		obj['t'] = [0, 0, 0]
-		stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
-		objang_str.append(stv)
-		objang_verts.append(vs)    
-		lab = 'ang_{:>2d}_{:>2d}'.format(i,angle)
-		render_names_objang.append(lab)
+    for angle in np.arange(-50, 51, 10):
+        obj['s'] = scale_init
+        obj['angles'] = [0, 0, 0]
+        obj['angles'][i] = angle
+        obj['t'] = [0, 0, 0]
+        stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
+        objang_str.append(stv)
+        objang_verts.append(vs)    
+        lab = 'ang_{:>2d}_{:>2d}'.format(i,angle)
+        render_names_objang.append(lab)
 
 obj_strs = np.array(objang_str)
 obj_strs = np.nan_to_num(obj_strs)
@@ -877,14 +1064,14 @@ art_mel_ver = []
 render_names_mel = []
 
 for factor in np.arange(low,(high+inc),inc):
-	k1 = baseline * factor
-	k1 = np.minimum(k1,0.43)
-	fmel = k1
-	stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
-	art_mel_str.append(stv)
-	art_mel_ver.append(vs)	
-	lab = 'mel_sc_{:.2f}'.format(factor)
-	render_names_mel.append(lab)
+    k1 = baseline * factor
+    k1 = np.minimum(k1,0.43)
+    fmel = k1
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
+    art_mel_str.append(stv)
+    art_mel_ver.append(vs)	
+    lab = 'mel_sc_{:.2f}'.format(factor)
+    render_names_mel.append(lab)
 
 amel_strs = np.array(art_mel_str)
 amel_strs = np.nan_to_num(amel_strs)
@@ -926,20 +1113,20 @@ chan_ver = []
 render_names_chan = []
 
 for i in range(3):
-	channel = i
-	for factor in np.arange(low,(high+inc),inc):
-		k1 = baseline * factor
-		k1 = np.minimum(k1,0.43)
-		fmel = k1
-		stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
-		chan_str.append(stv)
-		chan_ver.append(vs)	
-		lab = 'chan_{:>2d}_mel_{:.2f}'.format(i,factor)
-		render_names_chan.append(lab)
+    channel = i
+    for factor in np.arange(low,(high+inc),inc):
+        k1 = baseline * factor
+        k1 = np.minimum(k1,0.43)
+        fmel = k1
+        stv, vs = transform_test(vertices, obj, camera, source, temperature, channel, iepi, iderm)
+        chan_str.append(stv)
+        chan_ver.append(vs)	
+        lab = 'chan_{:>2d}_mel_{:.2f}'.format(i,factor)
+        render_names_chan.append(lab)
 
 chan_strs = np.array(chan_str)
 chan_strs = np.nan_to_num(chan_strs)
-
+"""
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # GLOBAL NORMALISATION CODE
@@ -950,16 +1137,19 @@ chan_strs = np.nan_to_num(chan_strs)
 #obj = 33
 #amel = 21
 #chan = 21
-
-all_strs = np.concatenate((cam_strs,light_strs,temp_strs,obj_strs,amel_strs,chan_strs))
+#UNCOMMENT LINE BELOW. IT IS COMMENTED FOR DEBUGGING
+#all_strs = np.concatenate((cam_strs,light_strs,temp_strs,obj_strs,amel_strs,chan_strs))
+all_strs = cam_strs
 all_strs = all_strs/np.max(all_strs)
-
+cam_strs = all_strs
+"""
 cam_strs = all_strs[0:40,:,:]
 light_strs = all_strs[40:139,:,:]
 temp_strs = all_strs[139:179,:,:]
 obj_strs = all_strs[179:212,:,:]
 amel_strs = all_strs[212:233,:,:]
 chan_strs = all_strs[233:254,:,:]
+"""
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 #***************************************
@@ -971,20 +1161,22 @@ if not os.path.exists(sf):
     os.mkdir(sf)
 maxi = 0
 for k in range(len(cam_strs)):
-	img = mesh.render.render_colors(cam_verts[k], triangles, cam_strs[k], h, w, c=1)
-	buff = np.ones((h,w,1))
-	anding = (np.logical_and(img,buff)).astype(int)
-	avgstr = np.sum(img)/np.sum(anding)
-	cam_render_str.append(avgstr)
-	maxi = np.maximum(maxi,np.max(img))
-	plt.figure(figsize=(10,10))
-	plt.imshow(img)
-	#plt.colorbar()
-	plt.set_cmap('inferno')
-	plt.clim(0,1)
-	plt.title('Average Strength = {:.5f}'.format(avgstr),fontdict={'fontsize': 25,'fontweight': 'bold'}) 
-	plt.text(128, 245, render_names[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
-	plt.savefig('{}/{:>2d}_'.format(sf, k) + render_names[k] + '.jpg')
+    img = mesh.render.render_colors(cam_verts[k], triangles, cam_strs[k], h, w, c=1)
+    buff = np.ones((h,w,1))
+    anding = (np.logical_and(img,buff)).astype(int)
+    avgstr = np.sum(img)/np.sum(anding)
+    cam_render_str.append(avgstr)
+    maxi = np.maximum(maxi,np.max(img))
+    plt.figure(figsize=(10,10))
+    plt.imshow(img)
+    #plt.colorbar()
+    plt.set_cmap('inferno')
+    plt.clim(0,1)
+    plt.title('Average Strength = {:.5f}'.format(avgstr),fontdict={'fontsize': 25,'fontweight': 'bold'}) 
+    plt.text(128, 245, render_names[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
+    plt.savefig('{}/{:>2d}_'.format(sf, k) + render_names[k] + '.jpg')
+plt.show()
+"""
 #0.663064
 #***************************************
 # Rendering the source position results
@@ -995,20 +1187,20 @@ if not os.path.exists(sf2):
     os.mkdir(sf2)
 maxi = 0
 for k in range(len(light_strs)):
-	img = mesh.render.render_colors(light_verts[k], triangles, light_strs[k], h, w, c=1)
-	buff = np.ones((h,w,1))
-	anding = (np.logical_and(img,buff)).astype(int)
-	avgstr = np.sum(img)/np.sum(anding)
-	light_render_str.append(avgstr)
-	maxi = np.maximum(maxi,np.max(img))
-	plt.figure(figsize=(10,10))
-	plt.imshow(img)
-	#plt.colorbar()
-	plt.set_cmap('inferno')
-	plt.clim(0,1)
-	plt.title('Average Strength = {:.5f}'.format(avgstr),fontdict={'fontsize': 25,'fontweight': 'bold'}) 
-	plt.text(128, 245, render_names_light[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
-	plt.savefig('{}/{:>2d}_'.format(sf2, k) + render_names_light[k] + '.jpg')
+    img = mesh.render.render_colors(light_verts[k], triangles, light_strs[k], h, w, c=1)
+    buff = np.ones((h,w,1))
+    anding = (np.logical_and(img,buff)).astype(int)
+    avgstr = np.sum(img)/np.sum(anding)
+    light_render_str.append(avgstr)
+    maxi = np.maximum(maxi,np.max(img))
+    plt.figure(figsize=(10,10))
+    plt.imshow(img)
+    #plt.colorbar()
+    plt.set_cmap('inferno')
+    plt.clim(0,1)
+    plt.title('Average Strength = {:.5f}'.format(avgstr),fontdict={'fontsize': 25,'fontweight': 'bold'}) 
+    plt.text(128, 245, render_names_light[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
+    plt.savefig('{}/{:>2d}_'.format(sf2, k) + render_names_light[k] + '.jpg')
 #0.966977
 #***************************************
 # Rendering the temperature results
@@ -1019,20 +1211,20 @@ if not os.path.exists(sf3):
     os.mkdir(sf3)
 maxi = 0
 for k in range(len(temp_strs)):
-	img = mesh.render.render_colors(temp_verts[k], triangles, temp_strs[k], h, w, c=1)
-	buff = np.ones((h,w,1))
-	anding = (np.logical_and(img,buff)).astype(int)
-	avgstr = np.sum(img)/np.sum(anding)
-	temp_render_str.append(avgstr)
-	maxi = np.maximum(maxi,np.max(img))
-	plt.figure(figsize=(10,10))
-	plt.imshow(img)
-	#plt.colorbar()
-	plt.set_cmap('inferno')
-	plt.clim(0,1)
-	plt.title('Average Strength = {:.5f}'.format(avgstr),fontdict={'fontsize': 25,'fontweight': 'bold'}) 
-	plt.text(128, 245, render_names_temp[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
-	plt.savefig('{}/{:>2d}_'.format(sf3, k) + render_names_temp[k] + '.jpg')
+    img = mesh.render.render_colors(temp_verts[k], triangles, temp_strs[k], h, w, c=1)
+    buff = np.ones((h,w,1))
+    anding = (np.logical_and(img,buff)).astype(int)
+    avgstr = np.sum(img)/np.sum(anding)
+    temp_render_str.append(avgstr)
+    maxi = np.maximum(maxi,np.max(img))
+    plt.figure(figsize=(10,10))
+    plt.imshow(img)
+    #plt.colorbar()
+    plt.set_cmap('inferno')
+    plt.clim(0,1)
+    plt.title('Average Strength = {:.5f}'.format(avgstr),fontdict={'fontsize': 25,'fontweight': 'bold'}) 
+    plt.text(128, 245, render_names_temp[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
+    plt.savefig('{}/{:>2d}_'.format(sf3, k) + render_names_temp[k] + '.jpg')
 #0.826988
 #***************************************
 # Rendering the object rotation results
@@ -1043,20 +1235,20 @@ if not os.path.exists(sf4):
     os.mkdir(sf4)
 maxi = 0
 for k in range(len(obj_strs)):
-	img = mesh.render.render_colors(objang_verts[k], triangles, obj_strs[k], h, w, c=1)
-	buff = np.ones((h,w,1))
-	anding = (np.logical_and(img,buff)).astype(int)
-	avgstr = np.sum(img)/np.sum(anding)
-	obj_render_str.append(avgstr)
-	maxi = np.maximum(maxi,np.max(img))
-	plt.figure(figsize=(10,10))
-	plt.imshow(img)
-	#plt.colorbar()
-	plt.set_cmap('inferno')
-	plt.clim(0,1)
-	plt.title('Average Strength = {:.5f}'.format(avgstr),fontdict={'fontsize': 25,'fontweight': 'bold'}) 
-	plt.text(128, 245, render_names_objang[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
-	plt.savefig('{}/{:>2d}_'.format(sf4, k) + render_names_objang[k] + '.jpg')
+    img = mesh.render.render_colors(objang_verts[k], triangles, obj_strs[k], h, w, c=1)
+    buff = np.ones((h,w,1))
+    anding = (np.logical_and(img,buff)).astype(int)
+    avgstr = np.sum(img)/np.sum(anding)
+    obj_render_str.append(avgstr)
+    maxi = np.maximum(maxi,np.max(img))
+    plt.figure(figsize=(10,10))
+    plt.imshow(img)
+    #plt.colorbar()
+    plt.set_cmap('inferno')
+    plt.clim(0,1)
+    plt.title('Average Strength = {:.5f}'.format(avgstr),fontdict={'fontsize': 25,'fontweight': 'bold'}) 
+    plt.text(128, 245, render_names_objang[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
+    plt.savefig('{}/{:>2d}_'.format(sf4, k) + render_names_objang[k] + '.jpg')
 #0.755280
 #***************************************
 # Rendering the melanin variation results
@@ -1067,20 +1259,20 @@ if not os.path.exists(sf5):
     os.mkdir(sf5)
 maxi = 0
 for k in range(len(amel_strs)):
-	img = mesh.render.render_colors(art_mel_ver[k], triangles, amel_strs[k], h, w, c=1)
-	buff = np.ones((h,w,1))
-	anding = (np.logical_and(img,buff)).astype(int)
-	avgstr = np.sum(img)/np.sum(anding)
-	mel_render_str.append(avgstr)
-	maxi = np.maximum(maxi,np.max(img))
-	plt.figure(figsize=(10,10))
-	plt.imshow(img)
-	#plt.colorbar()
-	plt.set_cmap('inferno')
-	plt.clim(0,1)
-	plt.title('Average Strength = {:.5f}'.format(avgstr),fontdict={'fontsize': 25,'fontweight': 'bold'}) 
-	plt.text(128, 245, render_names_mel[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
-	plt.savefig('{}/{:>2d}_'.format(sf5, k) + render_names_mel[k] + '.jpg')
+    img = mesh.render.render_colors(art_mel_ver[k], triangles, amel_strs[k], h, w, c=1)
+    buff = np.ones((h,w,1))
+    anding = (np.logical_and(img,buff)).astype(int)
+    avgstr = np.sum(img)/np.sum(anding)
+    mel_render_str.append(avgstr)
+    maxi = np.maximum(maxi,np.max(img))
+    plt.figure(figsize=(10,10))
+    plt.imshow(img)
+    #plt.colorbar()
+    plt.set_cmap('inferno')
+    plt.clim(0,1)
+    plt.title('Average Strength = {:.5f}'.format(avgstr),fontdict={'fontsize': 25,'fontweight': 'bold'}) 
+    plt.text(128, 245, render_names_mel[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
+    plt.savefig('{}/{:>2d}_'.format(sf5, k) + render_names_mel[k] + '.jpg')
 #maxi = 0.545389
 #****************************************************
 h = w = 256
@@ -1090,26 +1282,27 @@ if not os.path.exists(sf6):
     os.mkdir(sf6)
 maxi = 0
 for k in range(len(chan_strs)):
-	img = mesh.render.render_colors(chan_ver[k], triangles, chan_strs[k], h, w, c=1)
-	buff = np.ones((h,w,1))
-	anding = (np.logical_and(img,buff)).astype(int)
-	avgstr = np.sum(img)/np.sum(anding)
-	chan_render_str.append(avgstr)
-	maxi = np.maximum(maxi,np.max(img))
-	plt.figure(figsize=(10,10))
-	plt.imshow(img)
-	#plt.colorbar()
-	plt.set_cmap('inferno')
-	plt.clim(0,1)
-	plt.title('Average Strength = {:.5f}'.format(avgstr),fontdict={'fontsize': 25,'fontweight': 'bold'}) 
-	plt.text(128, 245, render_names_chan[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
-	plt.savefig('{}/{:>2d}_'.format(sf6, k) + render_names_chan[k] + '.jpg')
+    img = mesh.render.render_colors(chan_ver[k], triangles, chan_strs[k], h, w, c=1)
+    buff = np.ones((h,w,1))
+    anding = (np.logical_and(img,buff)).astype(int)
+    avgstr = np.sum(img)/np.sum(anding)
+    chan_render_str.append(avgstr)
+    maxi = np.maximum(maxi,np.max(img))
+    plt.figure(figsize=(10,10))
+    plt.imshow(img)
+    #plt.colorbar()
+    plt.set_cmap('inferno')
+    plt.clim(0,1)
+    plt.title('Average Strength = {:.5f}'.format(avgstr),fontdict={'fontsize': 25,'fontweight': 'bold'}) 
+    plt.text(128, 245, render_names_chan[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
+    plt.savefig('{}/{:>2d}_'.format(sf6, k) + render_names_chan[k] + '.jpg')
+
 #0.545389
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #TODO : continue the code from here
-
+"""
 #1 - Camera positions
 #Generating and plotting strength sum values for each of the axes
 plot_z_x = np.array(range(500,220,-40))
@@ -1185,3 +1378,4 @@ plt.plot(plot_z_x, plot_z_y)
 plt.grid(True)
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
