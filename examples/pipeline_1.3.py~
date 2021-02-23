@@ -133,8 +133,7 @@ def get_wos(wo):
         cross = [0,1,0]
     perp1 = normalize(np.cross(cross, wo))
     perp2 = normalize(np.cross(perp1, wo))
-    #return [wo, normalize(wo + perp1), normalize(wo - perp1), normalize(wo + perp2), normalize(wo - perp2)]
-    return [wo, normalize(wo + perp1), normalize(wo - perp1), normalize(wo + perp2), normalize(wo - perp2), perp1, perp2, -perp1, -perp2]
+    return [wo, normalize(wo + perp1), normalize(wo - perp1), normalize(wo + perp2), normalize(wo - perp2)]
 
 # Prevent memory errors from large dimensions
 def adder(a, b):
@@ -319,11 +318,9 @@ def transform_test(vertices, obj, camera, source, temperature, channel, h = 256,
         norm_i /= np.linalg.norm(norm_i)
         wo = normalize(camera['eye'])
         tot_brdf = float('-inf')
-        #wos = get_wos(camera['eye'] - vertices[index])
-        wos = get_wos(source - vertices[index])
+        wos = get_wos(camera['eye'] - vertices[index])
         for wo in wos:
             brdf_out = brdf(0.1, source - vertices[index], wo, -1*np.array(norm_i))
-            brdf_out *= np.dot(source - vertices[index], -1*np.array(norm_i))
             if tot_brdf == float('-inf'):
                 tot_brdf = brdf_out/len(wos)
             else:
@@ -335,18 +332,15 @@ def transform_test(vertices, obj, camera, source, temperature, channel, h = 256,
 
     brdf_val = np.array(brdf_val)
 
-
+    #midpoint = 0.99/np.percentile(brdf_val, 99)
     brdf_val = np.array(brdf_val).reshape(-1,1)
     #brdf_val = brdf_val*midpoint
     #brdf_val = np.minimum((brdf_val - 1),-0.0000001) + 1
     #brdf_val = brdf_val/np.percentile(brdf_val, 100)
     #brdf_val = brdf_val/np.amax(brdf_val)
     strength_val = strength_val*brdf_val
-
-    midpoint = 0.99/np.percentile(brdf_val, 99)
-    brdf_val = brdf_val*midpoint
-    brdf_val = np.minimum((brdf_val - 1),-0.0000001) + 1
     #brdf_val = np.array(brdf_val).reshape(-1,1)
+
     print('\n' + "BRDF Values")
     print(np.percentile(brdf_val, 10))
     print(np.percentile(brdf_val, 30))
@@ -575,8 +569,7 @@ def calc_mel_haem2(colors):
             pos_of_min = [k[0],k[1]]
         fblood.append(0.07*(pos_of_min[0]/len(sRGBim[:,0]))**3)
         fmel.append(0.43*(pos_of_min[1]/len(sRGBim[0]))**3)
-        if timer%(len(colors)//3) == 0:
-            print(str(100*timer/len(colors)) + "% completed processing")
+        print(str(100*timer/len(colors)) + "% completed processing")
         timer = timer + 1
     
     return fblood, fmel, pos_of_min
@@ -817,13 +810,14 @@ cam_verts = []
 render_names = []
 cam_brdfs = []
 # z-axis: eye from far to near, looking at the center of face
-"""
+
 #for p in np.arange(500, 250-1, -40): # 0.5m->0.25m
+for p in [-300, -100, 0]: # 0.5m->0.25m
     camera['eye'] = [0, 0, p]  # stay in front of face
     stv, vs, brdfs = transform_test(vertices, obj, camera, source, temperature, channel)
     cam_brdfs.append(brdfs)
     cam_pos_str.append(stv)
-    cam_brdfs.append(brdfs)
+    cam_pos_str.append(brdfs)
     cam_verts.append(vs)
     cam_verts.append(vs)
     lab = 'cp_z_{:>2d}'.format(p)
@@ -831,41 +825,27 @@ cam_brdfs = []
     render_names.append(lab)
 """
 # y-axis: eye from down to up, looking at the center of face
-#for p in np.arange(-300, 301, 60): # up 0.3m -> down 0.3m
-for p in [-300, -100, 0]: # 0.5m->0.25m
+
+for p in np.arange(-300, 301, 60): # up 0.3m -> down 0.3m
     camera['eye'] = [0, p, 250] # stay 0.25m far
-    stv, vs, brdfs = transform_test(vertices, obj, camera, source, temperature, channel)
-    print(f"brdf shape:{np.shape(brdfs)}")
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
     cam_pos_str.append(stv)
-    cam_brdfs.append(brdfs)
     cam_verts.append(vs)
     lab = 'cp_y_{:.2f}'.format(p)
     render_names.append(lab)
 
-# for p in [-300, -100, 0]:
-#     lab = 'BRDFcp_y_{:.2f}'.format(p)
-#     cam_verts.append(vs)
-#     render_names.append(lab)
-    
 # x-axis: eye from left to right, looking at the center of face
 
-#for p in np.arange(-300, 301, 60): # left 0.3m -> right 0.3m
-for p in [-300, -100]: # left 0.3m -> right 0.3m
+for p in np.arange(-300, 301, 60): # left 0.3m -> right 0.3m
     camera['eye'] = [p, 0, 250] # stay 0.25m far
-    stv, vs, brdfs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
     cam_pos_str.append(stv)
-    cam_brdfs.append(brdfs)
     cam_verts.append(vs)
     lab = 'cp_x_{:.2f}'.format(p)
     render_names.append(lab)
-# for p in [-300, -100]:
-#     cam_verts.append(vs)
-#     lab = 'BRDFcp_x_{:.2f}'.format(p)
-#     render_names.append(lab)
-
 
 # up direction
-"""
+
 camera['eye'] = [0, 0, 250] # stay in front
 for p in np.arange(-50, 51, 10):
     world_up = np.array([0, 1, 0]) # default direction
@@ -884,9 +864,7 @@ for p in np.arange(-50, 51, 10):
     render_names.append(lab)
 """
 cam_strs = np.array(cam_pos_str)
-#cam_brdfs = np.array(cam_brdfs)
 cam_strs = np.nan_to_num(cam_strs)
-#cam_brdfs = np.nan_to_num(cam_brdfs)
 """
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1132,12 +1110,7 @@ chan_strs = np.nan_to_num(chan_strs)
 
 #all_strs = np.concatenate((cam_strs,light_strs,temp_strs,obj_strs,amel_strs,chan_strs))
 all_strs = cam_strs
-#all_strs = all_strs/np.percentile(all_strs, 99)
-all_strs = all_strs/np.amax(all_strs)
-#print(f"all_strs before brdfs:{all_strs}, shape:{np.shape(all_strs)}")
-#print(f"cam_brdfs:{cam_brdfs}, np.shape:{np.shape(cam_brdfs)}")
-#all_strs = np.append(all_strs, cam_brdfs, axis=0)
-#print(f"combined:{all_strs}, shape of combined:{np.shape(all_strs)}")
+all_strs = all_strs/np.max(all_strs)
 cam_strs = all_strs
 
 """
