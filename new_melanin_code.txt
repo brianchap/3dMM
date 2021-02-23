@@ -15,8 +15,8 @@ def calc_mel_haem2(colors):
         k = np.unravel_index(np.argmin(diff, axis=None), diff.shape)
         if mini < min_diff:
             pos_of_min = [k[0],k[1]]
-        fblood.append((0.68399*(pos_of_min[0]/len(sRGBim[:,0])))**3)
-        fmel.append((0.79370*(pos_of_min[1]/len(sRGBim[0])))**3)
+        fblood.append(0.32*(pos_of_min[0]/len(sRGBim[:,0]))**3)
+        fmel.append(0.5*(pos_of_min[1]/len(sRGBim[0]))**3)
         print(str(100*timer/len(colors)) + "% completed processing")
         timer = timer + 1
     
