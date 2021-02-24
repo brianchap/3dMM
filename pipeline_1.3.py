@@ -343,9 +343,9 @@ def transform_test(vertices, obj, camera, source, temperature, channel, h = 256,
     #brdf_val = brdf_val/np.amax(brdf_val)
     strength_val = strength_val*brdf_val
 
-    midpoint = 0.99/np.percentile(brdf_val, 99)
-    brdf_val = brdf_val*midpoint
-    brdf_val = np.minimum((brdf_val - 1),-0.0000001) + 1
+    #midpoint = 0.99/np.percentile(brdf_val, 99)
+    #brdf_val = brdf_val*midpoint
+    #brdf_val = np.minimum((brdf_val - 1),-0.0000001) + 1
     #brdf_val = np.array(brdf_val).reshape(-1,1)
     print('\n' + "BRDF Values")
     print(np.percentile(brdf_val, 10))
@@ -364,7 +364,7 @@ def transform_test(vertices, obj, camera, source, temperature, channel, h = 256,
         projected_vertices = mesh.transform.perspective_project(camera_vertices, camera['fovy'], near = camera['near'], far = camera['far'])
         ## to image coords(position in image)
         image_vertices = mesh.transform.to_image(projected_vertices, h, w, True)
-    return strength_val, image_vertices, brdf_val
+    return strength_val, image_vertices
 
 #geometric functions for normal and angle calculation
 def normals_compute(vertices,triangles):
@@ -815,57 +815,38 @@ camera['up'] = [0, 1, 0] #
 cam_pos_str = []
 cam_verts = []
 render_names = []
-cam_brdfs = []
 # z-axis: eye from far to near, looking at the center of face
-"""
-#for p in np.arange(500, 250-1, -40): # 0.5m->0.25m
+for p in np.arange(500, 250-1, -40): # 0.5m->0.25m
     camera['eye'] = [0, 0, p]  # stay in front of face
-    stv, vs, brdfs = transform_test(vertices, obj, camera, source, temperature, channel)
-    cam_brdfs.append(brdfs)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
     cam_pos_str.append(stv)
-    cam_brdfs.append(brdfs)
-    cam_verts.append(vs)
     cam_verts.append(vs)
     lab = 'cp_z_{:>2d}'.format(p)
     render_names.append(lab)
-    render_names.append(lab)
-"""
+
 # y-axis: eye from down to up, looking at the center of face
-#for p in np.arange(-300, 301, 60): # up 0.3m -> down 0.3m
-for p in [-300, -100, 0]: # 0.5m->0.25m
+for p in np.arange(-300, 301, 60): # up 0.3m -> down 0.3m
     camera['eye'] = [0, p, 250] # stay 0.25m far
-    stv, vs, brdfs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
     print(f"brdf shape:{np.shape(brdfs)}")
     cam_pos_str.append(stv)
     cam_brdfs.append(brdfs)
     cam_verts.append(vs)
     lab = 'cp_y_{:.2f}'.format(p)
     render_names.append(lab)
-
-# for p in [-300, -100, 0]:
-#     lab = 'BRDFcp_y_{:.2f}'.format(p)
-#     cam_verts.append(vs)
-#     render_names.append(lab)
     
 # x-axis: eye from left to right, looking at the center of face
 
-#for p in np.arange(-300, 301, 60): # left 0.3m -> right 0.3m
-for p in [-300, -100]: # left 0.3m -> right 0.3m
+for p in np.arange(-300, 301, 60): # left 0.3m -> right 0.3m
     camera['eye'] = [p, 0, 250] # stay 0.25m far
-    stv, vs, brdfs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
     cam_pos_str.append(stv)
-    cam_brdfs.append(brdfs)
     cam_verts.append(vs)
     lab = 'cp_x_{:.2f}'.format(p)
     render_names.append(lab)
-# for p in [-300, -100]:
-#     cam_verts.append(vs)
-#     lab = 'BRDFcp_x_{:.2f}'.format(p)
-#     render_names.append(lab)
-
 
 # up direction
-"""
+
 camera['eye'] = [0, 0, 250] # stay in front
 for p in np.arange(-50, 51, 10):
     world_up = np.array([0, 1, 0]) # default direction
@@ -882,12 +863,10 @@ for p in np.arange(-50, 51, 10):
     cam_verts.append(vs)
     lab = 'cp_up_{:>2d}'.format(p)
     render_names.append(lab)
-"""
+
 cam_strs = np.array(cam_pos_str)
-#cam_brdfs = np.array(cam_brdfs)
 cam_strs = np.nan_to_num(cam_strs)
-#cam_brdfs = np.nan_to_num(cam_brdfs)
-"""
+
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1119,7 +1098,7 @@ for i in range(3):
 chan_strs = np.array(chan_str)
 chan_strs = np.nan_to_num(chan_strs)
 
-"""
+
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # GLOBAL NORMALISATION CODE
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1130,24 +1109,16 @@ chan_strs = np.nan_to_num(chan_strs)
 #amel = 11
 #chan = 18
 
-#all_strs = np.concatenate((cam_strs,light_strs,temp_strs,obj_strs,amel_strs,chan_strs))
-all_strs = cam_strs
-#all_strs = all_strs/np.percentile(all_strs, 99)
+all_strs = np.concatenate((cam_strs,light_strs,temp_strs,obj_strs,amel_strs,chan_strs))
 all_strs = all_strs/np.amax(all_strs)
-#print(f"all_strs before brdfs:{all_strs}, shape:{np.shape(all_strs)}")
-#print(f"cam_brdfs:{cam_brdfs}, np.shape:{np.shape(cam_brdfs)}")
-#all_strs = np.append(all_strs, cam_brdfs, axis=0)
-#print(f"combined:{all_strs}, shape of combined:{np.shape(all_strs)}")
-cam_strs = all_strs
 
-"""
 cam_strs = all_strs[0:40,:,:]
 light_strs = all_strs[40:66,:,:]
 temp_strs = all_strs[66:102,:,:]
 obj_strs = all_strs[102:135,:,:]
 amel_strs = all_strs[135:146,:,:]
 chan_strs = all_strs[146:164,:,:]
-"""
+
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 #***************************************
@@ -1175,7 +1146,7 @@ for k in range(len(cam_strs)):
     plt.text(128, 245, render_names[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
     plt.savefig('{}/{:>2d}_'.format(sf, k) + render_names[k] + '.jpg')
 plt.show()
-"""
+
 #0.663064
 #***************************************
 # Rendering the source position results
@@ -1300,7 +1271,7 @@ for k in range(len(chan_strs)):
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #TODO : continue the code from here
-"""
+
 #1 - Camera positions
 #Generating and plotting strength sum values for each of the axes
 plot_z_x = np.array(range(500,220,-40))
@@ -1319,7 +1290,7 @@ plt.plot(plot_z_x, plot_z_y)
 plt.grid(True)
 plt.plot(plot_up_x, plot_up_y)
 plt.grid(True)
-"""
+
 #2 - Source positions
 plot_x_x = np.array(range(-400,425,25))
 plot_x_y = light_render_str[0:33]
@@ -1451,4 +1422,4 @@ frame3[:,:,0] = sRGBim[pom[0],pom[1],0]
 frame3[:,:,1] = sRGBim[pom[0],pom[1],1]
 frame3[:,:,2] = sRGBim[pom[0],pom[1],2]
 plt.imshow(frame3) # shade estimated from the melanin/haemoglobin map
-"""
+
