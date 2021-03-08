@@ -5,8 +5,6 @@
 import os, sys
 import math
 from skimage import io
-from time import time
-import subprocess
 import matplotlib.pyplot as plt
 from MorphabelModel import MorphabelModel
 from IntensityPreprocessing import sRGB_generation
@@ -25,172 +23,86 @@ eta_i = 1
 # Refractive index of the material the light is hitting/entering
 eta_t = 1.45
 
-def prt_some(arr):
-    print(f"f10:{arr[:10]},L10:{arr[-10:]}, max, min:{max(arr)}, {min(arr)}")
-    return "printing"
+def normalize2(arr):
+    return np.divide(arr,(np.linalg.norm(arr,axis = 1)).reshape(-1,1))
 
-def normalize(arr):
-    return arr/np.linalg.norm(arr)
+def get_wos2(wo):
+    wo = normalize2(wo)
+    cros = np.zeros_like(wo)
+    cros[:,2] = np.logical_and((wo[:,2]-1), 1,dtype = float)
+    cros[:,1] = np.logical_not(cros[:,2])
+    perp1 = normalize2(np.cross(cros,wo))
+    perp2 = normalize2(np.cross(perp1,wo))
+    return [wo, normalize2(wo + perp1), normalize2(wo - perp1), normalize2(wo + perp2), normalize2(wo - perp2), perp1, perp2, -perp1, -perp2]
 
-# Microfacet distribution function
-# NOTE: theta_m is a debugging parameter, and can be removed (along with its corresponding if-else)
-def distr(w_h, n):
-
-    cos_wh = np.dot(w_h, n)
-    #return 1, 0, 0
-    
-    #cos_wh = np.cos(theta_m)
-    if cos_wh <= 0:
-        return 0
-    cos_theta_sqr = cos_wh ** 2
-    sin_theta_sqr = 1 - cos_theta_sqr
-
-    cos_theta_4 = pow(cos_theta_sqr, 2)
-    tan_sqr = sin_theta_sqr/cos_theta_sqr
-
-    width_sqr = pow(beck_width, 2)
-    return np.exp(-tan_sqr/width_sqr)/(math.pi * width_sqr * cos_theta_4)
-
-
-# Monodirectional shadowing helper function
-def monodir_shadowing(v, w_h, n):
-    #return 1
-    cos_sqr = np.dot(v, n)
-    sin_sqr = max(0, 1 - cos_sqr)
-    if np.dot(v, w_h) <= 0 or np.dot(v, n) <= 0:
-        return 0
-    else:
-        a = 1 / (beck_width * abs(np.sqrt(sin_sqr / cos_sqr)))
-    if a < 1.6:
-        a_sqr = a * a
-        return (3.535 * a + 2.181 * a_sqr)/(1 + 2.276 * a + 2.577 * a_sqr)
-    else:
-        return 1
-
-# Geometry function (using monodirectional shadowing function)
-def geom(w_i, w_o, w_h, n):
-    ret = 1
-    for w in [w_i, w_o]:
-        ret *= monodir_shadowing(w, w_h, n)
-    return ret
-        
-# Dielectric fresnel coefficients helper function
-def dielectric(ci, ct, ei, et):
-    r_par = (et * ci - ei * ct)/(et * ci + ei * ct)
-    r_perp = (ei * ci - et * ct)/(ei * ci + et * ct)
-    return 0.5 * (r_par * r_par + r_perp * r_perp)
-
-# Fresnel reflectance function for dielectrics (skin)
-def fres(cos_i):
+def fres2(cos_i):
     #return 1
     g = (eta_t**2)/(eta_i**2) - 1 + cos_i**2
-    if g <= 0:
-        return 1
-    
+    g = np.maximum(g,0)
+    an = np.logical_and(g, 1,dtype = float)
+    nott = np.logical_not(an)*1
     g = np.sqrt(g)
-    cos_i = abs(cos_i)
-    first_term = 0.5 * ((g - cos_i)**2)/((g + cos_i)**2)
-    second_term = 1 + (((cos_i * (g + cos_i) - 1)**2)/((cos_i * (g - cos_i) + 1)**2))
-    return first_term * second_term
+    cos_i = np.abs(cos_i)
+    first_term = 0.5 * np.divide(np.square(g - cos_i),np.square(g + cos_i))
+    second_term = 1 + np.divide(np.square(np.multiply(cos_i,(g + cos_i)) - 1),np.square(np.multiply(cos_i,(g - cos_i)) + 1))
+    out = np.multiply(first_term,second_term)
+    out = (out * an) + nott
+    return out
 
+def geom2(w_i, w_o, w_h, n):
+    out = 1
+    out *= np.multiply(monodir_shadowing2(w_i, w_h, n),monodir_shadowing2(w_o, w_h, n))
+    return out
 
-# Implementation of torrance-sparrow microfacet BRDF
-# Inputs:
-# p_s ... This value represents the oiliness of the skin- [0,1]
-# w_i, w_o ... These are 2 3d vectors that represent the incoming and outgoing lighting directions
-# Outputs:
-# Returns the torrance-sparrow brdf value
-def brdf(p_s, w_i, w_o, n):
-    n = n/np.linalg.norm(n)
-    w_i = w_i/np.linalg.norm(w_i)
-    w_o = w_o/np.linalg.norm(w_o)
-    cos_to = np.abs(np.dot(w_o, n))
-    cos_ti = np.abs(np.dot(w_i, n))
-    if cos_to == 0 or cos_ti == 0:
-        return 1
+def distr2(w_h, n):
+    cos_wh = np.sum(np.multiply(w_h,n),axis = 1).reshape(-1,1)
+    con1 = np.logical_and(np.maximum(cos_wh,0),1,dtype = float)
+    cos_theta_sqr = np.square(cos_wh)
+    sin_theta_sqr = 1 - cos_theta_sqr
+    cos_theta_4 = np.square(cos_theta_sqr)
+    tan_sqr = np.nan_to_num(np.divide(sin_theta_sqr,cos_theta_sqr),posinf=0)
+    width_sqr = np.square(beck_width)
+    outp = np.nan_to_num(np.divide(np.exp(np.divide(-tan_sqr,width_sqr)),(math.pi * width_sqr * cos_theta_4)),posinf = 0)
+    outp = outp * con1
+    return outp
     
+# Monodirectional shadowing helper function
+def monodir_shadowing2(v, w_h, n):
+    cos_sqr = np.sum(np.multiply(v,n),axis = 1).reshape(-1,1)
+    sin_sqr = np.maximum(0,(1-cos_sqr))
+    con1 = np.logical_and(np.maximum(cos_sqr,0),1,dtype = float) * np.logical_and(np.maximum(np.sum(np.multiply(v,w_h),axis = 1).reshape(-1,1),0),1,dtype = float)
+    
+    a = np.nan_to_num(1 / (beck_width * abs(np.sqrt(sin_sqr / cos_sqr))),posinf = 0)
+    con2 = np.logical_and(np.minimum(a-1.6,0),1,dtype = float)
+    nott = np.logical_not(con2)*1
+    a_sqr = np.square(a)
+    outp = np.nan_to_num(np.divide((3.535 * a + 2.181 * a_sqr),(1 + 2.276 * a + 2.577 * a_sqr)),posinf = 0)
+    outp = outp * con1
+    outp = (outp * con2) + nott
+    return outp
+
+def brdf2(p_s, w_i, w_o, n):
+    w_i = normalize2(w_i)
+    w_o = normalize2(w_o)
+    n = normalize2(n)
+    cos_to = np.abs(np.sum(np.multiply(w_o,n),axis = 1).reshape(-1,1))
+    cos_ti = np.abs(np.sum(np.multiply(w_i,n),axis = 1).reshape(-1,1))
+    con1 = np.logical_and(cos_ti,1,dtype = float)* np.logical_and(cos_to,1,dtype = float)
+    con1_inv = np.logical_not(con1)*1
     w_h = w_i + w_o
-    # Normalize w_h
-    if np.linalg.norm(w_h) == 0:
-        return 1
-    norm_wh = w_h / np.linalg.norm(w_h)
+    con2 = np.logical_and(np.linalg.norm(w_h,axis = 1),1,dtype = float).reshape(-1,1)
+    con2_inv = np.logical_not(con2)*1.0
+    norm_wh = np.nan_to_num(normalize2(w_h),posinf = 0)
+    f = fres2(np.sum(np.multiply(w_i,norm_wh),axis = 1).reshape(-1,1))
+    g = geom2(w_i, w_o, norm_wh, n)
+    d = distr2(norm_wh, n)
 
-    #f = fres_orig(np.dot(w_i, norm_wh))
-    f = fres(np.dot(w_i, norm_wh))
-
-    g = geom(w_i, w_o, norm_wh, n)
-    d = distr(norm_wh, n)
-    numer = p_s * g * d
-    denom = 4*cos_to*cos_ti
-    return (f*p_s*g*d)/(4*cos_to*cos_ti)
-
-# This function takes in an outgoing vector (camera vector) and returns a list of 10 vectors that are representative of its corresponding hemisphere.
-def get_wos(wo):
-    wo = normalize(wo)
-    if wo[2] != 1:
-        cross = [0,0,1]
-    else:
-        cross = [0,1,0]
-    perp1 = normalize(np.cross(cross, wo))
-    perp2 = normalize(np.cross(perp1, wo))
-    return [wo, normalize(wo + perp1), normalize(wo - perp1), normalize(wo + perp2), normalize(wo - perp2),perp1,perp2,-perp1,-perp2]
-
-# Prevent memory errors from large dimensions
-def adder(a, b):
-	c = []
-	if len(a) != len(b):
-		print("Dimensions invalid.")
-	else:
-		for i in range(len(a)):
-			c.append(a[i] + b[i])
-	return c
-
-def subter(a, b):
-	c = []
-	if len(a) != len(b):
-		print("Dimensions invalid.")
-	else:
-		for i in range(len(a)):
-			c.append(a[i] - b[i])
-	return c
-
-def multer(a, b):
-	c = []
-	if len(a) != len(b):
-		print("Dimensions invalid.")
-	else:
-		for i in range(len(a)):
-			c.append(a[i]*b[i])
-	return c
-
-def divider(a, b):
-	c = []
-	if len(a) != len(b):
-		print("Dimensions invalid.")
-	else:
-		for i in range(len(a)):
-			c.append(a[i]/b[i])
-	return c
-
-# def source_channel_distr(T, channel):
-# 	#T: temperature in Kelvin
-# 	#channel: color channel (0/1/2) - (R/G/B)
-# 	#l: wavelengths: in nm
-# 	wvs = [400, 410, 420, 430, 440, 450, 460, 470, 480, 490, 500, 510, 520, 530, 540, 550, 560, 570, 580, 590, 600, 610, 620, 630, 640, 650, 660, 670, 680, 690, 700, 710, 720]
-# 	l = wvs
-# 	h = 6.626e-34
-# 	k = 1.381e-23
-# 	c = 3.0e8 
-# 	l = [l2*1e-9 for l2 in l]
-# 	spd = [(8*np.pi*h*c*pow(l2,-5))/(np.exp((h*c)/(k*l2*T))-1) for l2 in l]
-# 	spd = [spd2/(np.sum(spd)) for spd2 in spd]
-# 	spd = np.array(spd)
-# 	spd_ch = spd*sensor_data[channel]
-# 	wavelength_ch = 10*round(sum(multer((spd_ch/sum(spd_ch)), wvs))/10, 0)
-# 	return wavelength_ch
+    out = np.nan_to_num(np.divide((f*p_s*g*d),(4*cos_to*cos_ti)),posinf=0)
+    out = out*con1 + con1_inv
+    out = out*con2 + con2_inv
+    return out
 
 ##########-----------------skin thickness per vertex functions---------------------##########
-
 
 # Maps each landmark from 1 to 60, with a corresponding epidermis thickness
 def contruct_mapping():
@@ -290,54 +202,27 @@ with open('extinction_coeff.txt') as f:
        molarExtinctionCoeffOxy[int(lmbda)] = float(muoxy)
        molarExtinctionCoeffDoxy[int(lmbda)] = float(mudoxy)
 
-def transform_test(vertices, obj, camera, source, temperature, channel, h = 256, w = 256):
+def transform_test2(vertices, obj, camera, source, temperature, channel, h = 256, w = 256):
     
-    '''
-    Args:
-        obj: dict contains obj transform paras
-        camera: dict contains camera paras
-    '''
     R = mesh.transform.angle2matrix(obj['angles'])
     transformed_vertices = mesh.transform.similarity_transform(vertices, obj['s'], R, obj['t'])
     vertices = transformed_vertices
 
+    strength_val, angles, normals = compute_strength2(temperature, channel, fblood, fmel, vertices, triangles, source, inp_derm_depth, inp_epi_depth)
     
-    strength_val, angles, normals = compute_strength(temperature, channel, fblood, fmel, vertices, triangles, source, inp_derm_depth, inp_epi_depth)
-    strength_val = np.array(strength_val)
+    norm_i = normalize2(normals)
+    brdf_val = np.zeros((len(vertices),1))
+    wos = get_wos2(source-vertices)
+    for wo in wos:
+        bro = brdf2(0.1,(camera['eye'] - vertices), wo, -1*norm_i)
+        bro2 = np.multiply(bro,(np.sum(np.multiply((source-vertices),-1*norm_i),axis = 1)).reshape(-1,1))
+        brdf_val = brdf_val + bro2/len(wos)
 
-    # NOTE: that all these other arrays (other than brdf_val) can be removed from the code. They are just there solely for debugging purposes.
-    brdf_val = []
-
-    for index, value in enumerate(vertices):
-        norm_i = normals[index]
-        norm_i /= np.linalg.norm(norm_i)
-        wo = normalize(camera['eye'])
-        tot_brdf = float('-inf')
-        #wos = get_wos(camera['eye'] - vertices[index])
-        wos = get_wos(source - vertices[index])
-        for wo in wos:
-            brdf_out = brdf(0.1, source - vertices[index], wo, -1*np.array(norm_i))
-            brdf_out *= np.dot(source - vertices[index], -1*np.array(norm_i))
-            if tot_brdf == float('-inf'):
-                tot_brdf = brdf_out/len(wos)
-            else:
-                tot_brdf = tot_brdf + brdf_out/len(wos)
-        curr_brdf = tot_brdf
-        brdf_val.append(curr_brdf)
-
-    brdf_val = np.array(brdf_val)
-    brdf_val = np.array(brdf_val).reshape(-1,1)
-    ##midpoint = 0.99/np.percentile(brdf_val, 99)
-    ##brdf_val = brdf_val*midpoint
-    ##brdf_val = np.minimum((brdf_val - 1),-0.0000001) + 1
-    ##brdf_val = brdf_val/np.percentile(brdf_val, 100)
-    ##brdf_val = brdf_val/np.amax(brdf_val)
     strength_val = strength_val*brdf_val
-    #brdf_val = np.array(brdf_val).reshape(-1,1)
-
+    
     print('\n' + "BRDF Values computed")
-    strength_val = strength_val * (np.divide(np.square(np.max(transformed_vertices[:,1]) - np.min(transformed_vertices[:,1])),np.square(source[2] - transformed_vertices[:,2]))).reshape(-1,1)
-
+    #strength_val = strength_val * (np.divide(np.square(np.max(transformed_vertices[:,1]) - np.min(transformed_vertices[:,1])),np.square(source[2] - transformed_vertices[:,2]))).reshape(-1,1)
+    strength_val = strength_val * (np.divide(np.square(face_length),np.sum(np.square(source-transformed_vertices), axis = 1))).reshape(-1,1)
     if camera['proj_type'] == 'orthographic':
         projected_vertices = transformed_vertices
         image_vertices = mesh.transform.to_image(projected_vertices, h, w)
@@ -377,118 +262,59 @@ def angles_compute(v1,v2):
 def computebackScatteringCoefficient(lmbda):
   mieScattering = 2 * pow(10,5) * pow(lmbda,-1.5)
   rayleighScattering = 2 * pow(10,12) * pow(lmbda,-4)
-  return mieScattering + rayleighScattering
+  return (mieScattering + rayleighScattering)
 
 # mu_skin computation
 def computeAbsorptionCoefficientSkin(lmbda):
-  a = (lmbda - 154) / 66.2
-  return 0.244 + 85.3 * np.exp(-1 * a)
+  a = np.divide((lmbda - 154),66.2)
+  return 0.244 + np.multiply(85.3,np.exp(-1 * a))
 
 # mu_blood computation
 def computeAbsorptionCoefficientBlood(lmbda):
-  muOxy = (2.303 * molarExtinctionCoeffOxy[lmbda] * 150)/64500
-  muDoxy = (2.303 * molarExtinctionCoeffDoxy[lmbda] * 150)/64500
-  return 0.75 * muOxy + 0.25 * muDoxy
+  muOxy = molarExtinctionCoeffOxy[lmbda]
+  muDoxy = molarExtinctionCoeffDoxy[lmbda]
+  return ((0.75 * muOxy + 0.25 * muDoxy)*((150*2.303)/64500))
 
-# mu_dermis computation
-def computeAbsorptionCoefficientDermis(lmbda,fblood):
-  mublood = computeAbsorptionCoefficientBlood(lmbda)
-  muskin = computeAbsorptionCoefficientSkin(lmbda)
-  mudermis = [x * mublood + (1-x) * muskin for x in fblood]
-  return mudermis
+def computeAbsorptionCoefficientEpidermis2(lmbda,fmel):
+	x1 = [10 , lmbda]
+	x2 = [11,-3.33]
+	v = np.power(x1,x2)
+	mumel = fmel*(6.6*v[0]*v[1])
+	muskin = computeAbsorptionCoefficientSkin(lmbda)
+	return (1-fmel)*muskin + mumel
+	
+def computeTepidermis2(lmbda,fmel,d_epi):
+	muepidermis = computeAbsorptionCoefficientEpidermis2(lmbda,fmel)
+	prod = np.multiply(d_epi,muepidermis) * -1
+	return np.exp(prod)
+	
+def computeAbsorptionCoefficientDermis2(lmbda,fblood):
+	mublood = computeAbsorptionCoefficientBlood(lmbda)
+	muskin = computeAbsorptionCoefficientSkin(lmbda)
+	mudermis = np.add((fblood * mublood),(1 - fblood) * muskin)
+	return mudermis	
 
-def computeK(lmbda,fblood):
-  k = computeAbsorptionCoefficientDermis(lmbda,fblood)
+def compute_K_Beta(lmbda,fblood):
+  k = computeAbsorptionCoefficientDermis2(lmbda,fblood)
   s = computebackScatteringCoefficient(lmbda)
-  return [np.sqrt(y*(y + 2*s)) for y in k]
+  return np.sqrt(np.multiply(k,(k + 2*s))), np.sqrt(np.divide(k,(k + 2*s)))
 
-def computeBeta(lmbda,fblood):
-  k = computeAbsorptionCoefficientDermis(lmbda,fblood)
-  s = computebackScatteringCoefficient(lmbda)
-  return [np.sqrt(z/( z + 2*s )) for z in k]
-
-def computeDk_Dfblood(lmbda):
-  mublood = computeAbsorptionCoefficientBlood(lmbda)
-  muskin = computeAbsorptionCoefficientSkin(lmbda)
-  return mublood - muskin
-
-def computeDbeta2_Dk(lmbda,fblood):
-  k = computeAbsorptionCoefficientDermis(lmbda,fblood)
-  s = computebackScatteringCoefficient(lmbda)
-  return [(2 * s) / pow(a + 2 * s, 2) for a in k]
-
-def computeDK_Dk(lmbda,fblood):
-  k = computeAbsorptionCoefficientDermis(lmbda,fblood)
-  s = computebackScatteringCoefficient(lmbda)
-  return [( b + s) / np.sqrt(b*(b + 2 *s )) for b in k]
-
-def computeDR_DK(lmbda,fblood,d):
-  b = computeBeta(lmbda,fblood)
-  K = computeK(lmbda,fblood)
-  nr = multer([(1 - c * c) * 8 * c for c in b], d)
-  dr = [pow(j,2) for j in subter(multer([pow((1 + g),2) for g in b], [np.exp(f) for f in multer(K, d)]), multer([pow((1 - h),2) for h in b], [np.exp(-1*e) for e in multer(K, d)]))]
-  return divider(nr, dr)
-
-def computeDR_Dbeta2(lmbda,fblood,d):
-  b = computeBeta(lmbda,fblood)
-  K = computeK(lmbda,fblood)
-  expnt = multer(K, d)
-  dr = subter(multer([pow((1 + g),2) for g in b], [np.exp(f) for f in expnt]), multer([pow((1 - h),2) for h in b], [np.exp(-1*e) for e in expnt]))
-  trm2 = [1/m for m in dr]
-  nr = subter(multer([(pow(n,2) -1)*(1 + 1/n) for n in b], [np.exp(o) for o in expnt]), multer([(pow(p,2) -1)*(1 - 1/p) for p in b], [np.exp(-1*q) for q in expnt]))
-  #nr = subter(multer([(pow(n,2) -1)*(1 + 1/n) for n in b], [np.exp(o) for o in expnt]), multer([(1 - 1/p) for p in b], [np.exp(-1*q) for q in expnt]))
-  trm1 = divider(nr, [pow(r,2) for r in dr])
-  return multer((subter(trm1, trm2)), [subter(np.exp(s), np.exp(-1*s)) for s in expnt])
-
-def computeRdermis(lmbda,fblood,d):
-  DR_Dbeta2 = computeDR_Dbeta2(lmbda,fblood,d)
-  Dbeta2_Dk = computeDbeta2_Dk(lmbda,fblood)
-  DR_DK = computeDR_DK(lmbda,fblood,d)
-  DK_Dk = computeDK_Dk(lmbda,fblood)
-  Dk_Dfblood = computeDk_Dfblood(lmbda)
-  #https://openaccess.thecvf.com/content_ICCV_2017_workshops/papers/w16/Alotaibi_A_Biophysical_3D_ICCV_2017_paper.pdf table1 of this paper deltaFblood mentioned
-  deltaFblood = 0.05
-  # print("DR_Dbeta2 =",DR_Dbeta2, " Dbeta2_Dk =",Dbeta2_Dk," DR_DK = ",DR_DK, " DK_Dk = ",DK_Dk," Dk_Dfblood = ",Dk_Dfblood)
-  Rdermis = [ar * Dk_Dfblood * deltaFblood for ar in adder(multer(DR_DK, DK_Dk), multer(DR_Dbeta2, Dbeta2_Dk))]
-  return Rdermis
-
-def computeAbsorptionCoefficientEpidermis(lmbda,fmel,d_epi):
-  mumel = [6.6 * pow(10,11) * pow(lmbda,-3.33) for d_epis in d_epi]
-  muskin = computeAbsorptionCoefficientSkin(lmbda)
-  return adder(multer(fmel, mumel), [(1-w) * muskin for w in fmel])
-
-def computeTepidermis(lmbda,fmel,d_epi):
-  muepidermis = computeAbsorptionCoefficientEpidermis(lmbda,fmel,d_epi)
-  prod = multer(d_epi,muepidermis)
-  return [np.exp(-1 * v) for v in prod]
-
-def computeTotalReflectance(lmbda,fblood,fmel,d):
-  Rdermis = computeRdermis(lmbda,fblood,d)
-  # print("Tepidermis = ",Tepidermis)
-  # print("Rdermis = ",Rdermis)
-  dRdermis =  Rdermis
-  return dRdermis
-
-def computeIntensity(lmbda,fblood,fmel,d,d_epi):
-  Tepidermis = computeTepidermis(lmbda,fmel,d_epi)
-  dRdermis = computeTotalReflectance(lmbda,fblood,fmel,d)
-  return np.abs(multer([aq**2 for aq in Tepidermis], dRdermis))
-
-def computeR(lmbda,fblood,fmel,d,d_epi):
-    Tepidermis = computeTepidermis(lmbda,fmel,d_epi)
-    b = computeBeta(lmbda,fblood)
-    K = computeK(lmbda,fblood)
-    expnt = multer(K, d)
-    R = multer([pow((1 - h),2) for h in b], subter([np.exp(f) for f in expnt],[np.exp(-1*e) for e in expnt]))  
-    R = divider(R,subter(multer([pow((1 + g),2) for g in b], [np.exp(f) for f in expnt]), multer([pow((1 - h),2) for h in b], [np.exp(-1*e) for e in expnt])))
+def computeR2(lmbda,fb_low,fb_high,fmel,d,d_epi):
+    Tepidermis = computeTepidermis2(lmbda,fmel,d_epi)
     
-    return np.abs(multer([aq**2 for aq in Tepidermis], R))	
+    K1, b1 = compute_K_Beta(lmbda,fb_low)
+    K2, b2 = compute_K_Beta(lmbda,fb_high)
 	
-	
+    R1 = np.divide((np.square(1-b1)*(np.exp(K1*d)-np.exp(-1*K1*d))),np.subtract(np.square(1+b1)*np.exp(K1*d),np.square(1-b1)*np.exp(-1*K1*d)))
+    R2 = np.divide((np.square(1-b2)*(np.exp(K2*d)-np.exp(-1*K2*d))),np.subtract(np.square(1+b2)*np.exp(K2*d),np.square(1-b2)*np.exp(-1*K2*d)))
+    out = np.abs(np.abs(np.square(Tepidermis)*R2) - np.abs(np.square(Tepidermis)*R1))
+    return out
 
 #consolidated function to return strength
-def compute_strength(T,ch,fblood,fmel,vertices,triangles,s,d_derm,d_epi):
+def compute_strength2(T,ch,fblood,fmel,vertices,triangles,s,d_derm,d_epi):
     eps = 1e-6
+    fm = np.array(fmel).reshape(-1,1)
+    d_epi = d_epi.reshape(-1,1)
     #- s is light source coordinates
     #- d_epi + d_derm is the avg. skin depth
     #lmbda- wavelength of incident radiation, between 400 and 730 nm
@@ -498,17 +324,11 @@ def compute_strength(T,ch,fblood,fmel,vertices,triangles,s,d_derm,d_epi):
     normals = normals_compute(vertices,triangles)
     angles = angles_compute(normals,direction)
     print('\n'+"Angles Values computed")
-    # print(np.min(angles))
-    # print(np.max(angles))
     
-    d_real = divider(d_derm, np.cos(angles)+eps)
+    d_real = np.divide((d_derm.reshape(-1,1)), np.cos(angles)+eps)
     d_real = np.maximum(d_real,0)
     print('\n' + "d_real Values computed")
-    # print(np.percentile(d_real, 10))
-    # print(np.percentile(d_real, 30))
-    # print(np.percentile(d_real, 50))
-    # print(np.percentile(d_real, 70))
-    # print(np.percentile(d_real, 90))
+
 
     wvs = [400, 410, 420, 430, 440, 450, 460, 470, 480, 490, 500, 510, 520, 530, 540, 550, 560, 570, 580, 590, 600, 610, 620, 630, 640, 650, 660, 670, 680, 690, 700, 710, 720]
     l = wvs
@@ -521,59 +341,23 @@ def compute_strength(T,ch,fblood,fmel,vertices,triangles,s,d_derm,d_epi):
     spd = np.array(spd)
     chan = spd*sensor_data[ch]
     total_sig = np.zeros((len(vertices),1))
-    fbla1 = []
-    [fbla1.append(0.01) for i in range(53215)]
-    fbla2 = []
-    [fbla2.append(0.07) for i in range(53215)]
-
+    fbl = 0.01
+    fbh = 0.07
     #alls = []
     for i in range(len(wvs)):
     	lmbda = wvs[i]
-    	fblood = fbla1
-    	a1 = computeR(lmbda,fblood,fmel,d_real,d_epi)
-    	fblood = fbla2
-    	a2 = computeR(lmbda,fblood,fmel,d_real,d_epi)
-    	signal = np.abs(a2 - a1)
+    	signal = computeR2(lmbda,fbl,fbh,fm,d_real,d_epi)
+
     	signal = np.nan_to_num(signal)
-		#reshaping signal to nVert,1
-    	signal = np.reshape(signal,(-1,1))
+
     	total_sig = total_sig + signal*chan[i]
     	#alls.append(signal)
 	    #signal = signal/np.max(signal) #normalize to 0=1: if linear normalization doesnt enable good visualization, can also use dB scale
 
     signal = total_sig
     print('\n' + "Strength Values computed")
-    # print(np.percentile(signal, 10))
-    # print(np.percentile(signal, 30))
-    # print(np.percentile(signal, 50))
-    # print(np.percentile(signal, 70))
-    # print(np.percentile(signal, 90))
-    return signal, angles, normals
 
-def calc_mel_haem(colors):
-    fblood = []
-    fmel = []
-    timer = 1
-    for color in colors:
-        k = 1
-        diff = 0
-        pos_of_min = [0, 0]
-        min_diff = 10e30
-        i1 = np.square(sRGBim[:,:,0] - color[0])
-        i2 = np.square(sRGBim[:,:,1] - color[1])
-        i3 = np.square(sRGBim[:,:,2] - color[2])
-        diff = np.sqrt(i1+i2+i3)
-        mini = np.min(diff)
-        k = np.unravel_index(np.argmin(diff, axis=None), diff.shape)
-        if mini < min_diff:
-            pos_of_min = [k[0],k[1]]
-        fblood.append(0.02 + 0.05*(pos_of_min[0]/len(sRGBim)))
-        fmel.append(0.013 + 0.417*(pos_of_min[1]/len(sRGBim[0])))
-        if timer%(len(colors)//3) == 0:
-            print(str(100*timer/len(colors)) + "% completed processing")
-        timer = timer + 1
-    
-    return fblood, fmel
+    return signal, angles, normals
 
 def calc_mel_haem2(colors):
     fblood = []
@@ -606,21 +390,15 @@ def tri_area(x1, y1, x2, y2, x3, y3):
                 + x3 * (y1 - y2)) / 2.0) 
   
 def inTri(tri, point): 
-	  
     # Calculate area of triangle ABC 
     A = tri_area(tri[0,0],tri[0,1],tri[1,0],tri[1,1],tri[2,0],tri[2,1]) 
-  
     # Calculate area of triangle PBC  
     A1 = tri_area(tri[1,0],tri[1,1],tri[2,0],tri[2,1],point[0],point[1]) 
-      
     # Calculate area of triangle PAC  
     A2 = tri_area(tri[0,0],tri[0,1],tri[2,0],tri[2,1],point[0],point[1]) 
-      
     # Calculate area of triangle PAB  
     A3 = tri_area(tri[0,0],tri[0,1],tri[1,0],tri[1,1],point[0],point[1]) 
-      
-    # Check if sum of A1, A2 and A3  
-    # is same as A 
+    # Check if sum of A1, A2 and A3 is same as A  
     if(abs(A - (A1 + A2 + A3))<0.01): 
         return True
     else: 
@@ -787,18 +565,25 @@ transformed_vertices = transformed_vertices - np.mean(transformed_vertices, 0)[n
 vertices = transformed_vertices
 c = 3
 
+global face_length
+face_length = np.sqrt(np.sum(np.square(transformed_vertices[np.argmax(transformed_vertices[:,1]),:] - transformed_vertices[np.argmin(transformed_vertices[:,1]),:])))
+
 # channel = 2
 # camera['eye'] = [0, 0, 250]
-# source = (0,0,400)  # stay in front of face
+
+# source = (0,0,600)  # stay in front of face
 # beg = time.time()
-# stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+# #stv1, vs1 = transform_test(vertices, obj, camera, source, temperature, channel)
+# stv2, vs2 = transform_test2(vertices, obj, camera, source, temperature, channel)
 # end = time.time()
 # print(end-beg)
-# #stv = stv/np.max(stv)
-# img = mesh.render.render_colors(vs,triangles,stv, 256, 256, c=1)
+# # stv2 = stv2/np.max(stv2)
+# img = mesh.render.render_colors(vs2,triangles,stv2, 256, 256, c=1)
 # plt.imshow(img)
 # plt.set_cmap('inferno')
-# plt.clim(0,0.005)
+# plt.clim(0,0.001)
+
+#diff = np.sum(np.abs(stv1 - stv2))
 
 #mouth = bfm.model['tri_mouth']
 #tri2 = bfm.full_triangles
@@ -811,7 +596,7 @@ camera = {}
 ### face in reality: ~18cm height/width. set 180 = 18cm. image size: 256 x 256
 scale_init = 180/(np.max(vertices[:,1]) - np.min(vertices[:,1])) # scale face model to real size
 camera['eye'] = [0, 0, 250]
-source = (0,0,200)
+source = (0,0,150)
 temperature = 5500 # temperature is a variable parameter 
 channel = 1 #channel can be 0 or 1 or 2 corresponding to (R/G/B) or (B/G/R) - doubt
 obj['s'] = scale_init
@@ -834,7 +619,7 @@ begi = time.time()
 for p in np.arange(500, 250-1, -40): # 0.5m->0.25m
 	beg = time.time()
 	camera['eye'] = [0, 0, p]  # stay in front of face
-	stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+	stv, vs = transform_test2(vertices, obj, camera, source, temperature, channel)
 	cam_pos_str.append(stv)
 	cam_verts.append(vs)
 	lab = 'cp_z_{:>2d}'.format(p)
@@ -848,7 +633,7 @@ print("\n"+ str(700/40) + "% complete \n")
 for p in np.arange(-300, 301, 60): # up 0.3m -> down 0.3m
 	beg = time.time()
 	camera['eye'] = [0, p, 250] # stay 0.25m far
-	stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+	stv, vs = transform_test2(vertices, obj, camera, source, temperature, channel)
 	cam_pos_str.append(stv)
 	cam_verts.append(vs)
 	lab = 'cp_y_{:.2f}'.format(p)
@@ -861,7 +646,7 @@ print("\n"+ str(1800/40) + "% complete \n")
 for p in np.arange(-300, 301, 60): # left 0.3m -> right 0.3m
 	beg = time.time()
 	camera['eye'] = [p, 0, 250] # stay 0.25m far
-	stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+	stv, vs = transform_test2(vertices, obj, camera, source, temperature, channel)
 	cam_pos_str.append(stv)
 	cam_verts.append(vs)
 	lab = 'cp_x_{:.2f}'.format(p)
@@ -884,7 +669,7 @@ for p in np.arange(-50, 51, 10):
 	# note that: rotating up direction is opposite to rotating obj
 	# just imagine: rotating camera 20 degree clockwise, is equal to keeping camera fixed and rotating obj 20 degree anticlockwise.
 	camera['up'] = np.squeeze(up)
-	stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+	stv, vs = transform_test2(vertices, obj, camera, source, temperature, channel)
 	cam_pos_str.append(stv)
 	cam_verts.append(vs)
 	lab = 'cp_up_{:>2d}'.format(p)
@@ -906,7 +691,7 @@ camera = {}
 ### face in reality: ~18cm height/width. set 180 = 18cm. image size: 256 x 256
 scale_init = 180/(np.max(vertices[:,1]) - np.min(vertices[:,1])) # scale face model to real size
 camera['eye'] = [0, 0, 250]
-source = (0,0,200)
+source = (0,0,250)
 temperature = 5500 # temperature is a variable parameter 
 channel = 1 #channel can be 0 or 1 or 2 corresponding to (R/G/B) or (B/G/R) - doubt
 obj['s'] = scale_init
@@ -928,8 +713,8 @@ render_names_light = []
 begi = time.time()
 for i,p in enumerate(range(-400, 401, 100)):
     beg = time.time()
-    source = (p,0,200)
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    source = (p,0,250)
+    stv, vs = transform_test2(vertices, obj, camera, source, temperature, channel)
     light_pos_str.append(stv)
     light_verts.append(vs)
     lab = 'lit_x_{:>2d}'.format(p)
@@ -941,8 +726,8 @@ print("\n"+ str(900/26) + "% complete \n")
 
 for i,p in enumerate(range(-400, 401, 100)):
     beg = time.time()
-    source = (0,p,200)
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    source = (0,p,250)
+    stv, vs = transform_test2(vertices, obj, camera, source, temperature, channel)
     light_pos_str.append(stv)
     light_verts.append(vs)
     lab = 'lit_y_{:>2d}'.format(p)
@@ -952,10 +737,10 @@ for i,p in enumerate(range(-400, 401, 100)):
 
 print("\n"+ str(1800/26) + "% complete \n")
 
-for i,p in enumerate(range(300, 1001, 100)):
+for i,p in enumerate(range(200, 901, 100)):
     beg = time.time()
     source = (0,0,p)
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test2(vertices, obj, camera, source, temperature, channel)
     light_pos_str.append(stv)
     light_verts.append(vs)
     lab = 'lit_z_{:>2d}'.format(p)
@@ -977,7 +762,7 @@ camera = {}
 ### face in reality: ~18cm height/width. set 180 = 18cm. image size: 256 x 256
 scale_init = 180/(np.max(vertices[:,1]) - np.min(vertices[:,1])) # scale face model to real size
 camera['eye'] = [0, 0, 250]
-source = (0,0,200)
+source = (0,0,150)
 channel = 1 #channel can be 0 or 1 or 2 corresponding to (R/G/B) or (B/G/R) - doubt
 obj['s'] = scale_init
 obj['angles'] = [0, 0, 0]
@@ -997,7 +782,7 @@ render_names_temp = []
 for i,p in enumerate(range(3000, 9000, 250)):
     beg = time.time()
     temperature = p
-    stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+    stv, vs = transform_test2(vertices, obj, camera, source, temperature, channel)
     temp_str.append(stv)
     temp_verts.append(vs)
     lab = 'temp_{:>2d}'.format(p)
@@ -1017,7 +802,7 @@ camera = {}
 ### face in reality: ~18cm height/width. set 180 = 18cm. image size: 256 x 256
 scale_init = 180/(np.max(vertices[:,1]) - np.min(vertices[:,1])) # scale face model to real size
 camera['eye'] = [0, 0, 250]
-source = (0,0,200)
+source = (0,0,150)
 temperature = 5500
 channel = 1 #channel can be 0 or 1 or 2 corresponding to (R/G/B) or (B/G/R) - doubt
 obj['s'] = scale_init
@@ -1042,7 +827,7 @@ for i in range(3):
 		obj['angles'] = [0, 0, 0]
 		obj['angles'][i] = angle
 		obj['t'] = [0, 0, 0]
-		stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+		stv, vs = transform_test2(vertices, obj, camera, source, temperature, channel)
 		objang_str.append(stv)
 		objang_verts.append(vs)    
 		lab = 'ang_{:>2d}_{:>2d}'.format(i,angle)
@@ -1061,7 +846,7 @@ camera = {}
 ### face in reality: ~18cm height/width. set 180 = 18cm. image size: 256 x 256
 scale_init = 180/(np.max(vertices[:,1]) - np.min(vertices[:,1])) # scale face model to real size
 camera['eye'] = [0, 0, 250]
-source = (0,0,200)
+source = (0,0,150)
 temperature = 5500
 channel = 1 #channel can be 0 or 1 or 2 corresponding to (R/G/B) or (B/G/R) - doubt
 obj['s'] = scale_init
@@ -1090,7 +875,7 @@ for factor in np.arange(low,(high+inc),inc):
 	k1 = baseline * factor
 	k1 = np.minimum(k1,0.43)
 	fmel = k1
-	stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+	stv, vs = transform_test2(vertices, obj, camera, source, temperature, channel)
 	art_mel_str.append(stv)
 	art_mel_ver.append(vs)	
 	lab = 'mel_sc_{:.2f}'.format(factor)
@@ -1111,7 +896,7 @@ camera = {}
 ### face in reality: ~18cm height/width. set 180 = 18cm. image size: 256 x 256
 scale_init = 180/(np.max(vertices[:,1]) - np.min(vertices[:,1])) # scale face model to real size
 camera['eye'] = [0, 0, 250]
-source = (0,0,200)
+source = (0,0,150)
 temperature = 5500
 channel = 1 #channel can be 0 or 1 or 2 corresponding to (R/G/B) or (B/G/R) - doubt
 obj['s'] = scale_init
@@ -1130,7 +915,7 @@ baseline = np.array(fmel)
 max_val = np.percentile(baseline,96)
 low = 0.01/max_val
 high = 0.43/max_val
-inc = (high-low)/10
+inc = (high-low)/20
 
 chan_str = []
 chan_ver = []
@@ -1190,7 +975,7 @@ for i in range(3):
 		k1 = baseline * factor
 		k1 = np.minimum(k1,0.43)
 		fmel = k1
-		stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+		stv, vs = transform_test2(vertices, obj, camera, source, temperature, channel)
 		chan_str.append(stv)
 		chan_ver.append(vs)	
 		lab = 'chan_{:>2d}_mel_{:.2f}'.format(i,factor)
@@ -1201,8 +986,8 @@ for i in range(3):
 chan_strs = np.array(chan_str)
 chan_strs = np.nan_to_num(chan_strs)
 
-stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
-global comm_brdf
+# stv, vs = transform_test(vertices, obj, camera, source, temperature, channel)
+# global comm_brdf
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # GLOBAL NORMALISATION CODE
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1221,15 +1006,15 @@ light_strs = all_strs[40:66,:,:]
 temp_strs = all_strs[66:90,:,:]
 obj_strs = all_strs[90:123,:,:]
 amel_strs = all_strs[123:154,:,:]
-chan_strs = all_strs[154:187,:,:]
+chan_strs = all_strs[154:217,:,:]
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 #***************************************
 # Rendering the camera position results
-#cam_strs = cam_strs/np.max(cam_strs)
+cam_strs = cam_strs/np.max(cam_strs)
 h = w = 256
 cam_render_str = []
-sf = 'results/final_results/camera_positions'
+sf = 'results/final_results/camera_positions_3'
 if not os.path.exists(sf):
     os.mkdir(sf)
 maxi = 0
@@ -1244,7 +1029,7 @@ for k in range(len(cam_strs)):
 	plt.imshow(img)
 	#plt.colorbar()
 	plt.set_cmap('inferno')
-	plt.clim(0,0.1)
+	#plt.clim(0,0.1)
 	plt.title('Average Strength = {:.5f}'.format(avgstr),fontdict={'fontsize': 25,'fontweight': 'bold'}) 
 	plt.text(128, 245, render_names[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
 	plt.savefig('{}/{:>2d}_'.format(sf, k) + render_names[k] + '.jpg')
@@ -1254,7 +1039,7 @@ print(maxi)
 # Rendering the source position results
 h = w = 256
 light_render_str = []
-sf2 = 'results/final_results/source_positions'
+sf2 = 'results/final_results/source_positions_3'
 if not os.path.exists(sf2):
     os.mkdir(sf2)
 maxi = 0
@@ -1269,16 +1054,15 @@ for k in range(len(light_strs)):
 	plt.imshow(img)
 	#plt.colorbar()
 	plt.set_cmap('inferno')
-	plt.clim(0,0.1)
+	#plt.clim(0,0.0085)
 	plt.title('Average Strength = {:.5f}'.format(avgstr),fontdict={'fontsize': 25,'fontweight': 'bold'}) 
 	plt.text(128, 245, render_names_light[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
 	plt.savefig('{}/{:>2d}_'.format(sf2, k) + render_names_light[k] + '.jpg')
 print(maxi)
-#0.3393
 #***************************************
 # Rendering the temperature results
 h = w = 256
-sf3 = 'results/final_results/temperature_values'
+sf3 = 'results/final_results/temperature_values_2'
 temp_render_str = []
 if not os.path.exists(sf3):
     os.mkdir(sf3)
@@ -1294,7 +1078,7 @@ for k in range(len(temp_strs)):
 	plt.imshow(img)
 	#plt.colorbar()
 	plt.set_cmap('inferno')
-	plt.clim(0,0.1)
+	plt.clim(0,0.00004)
 	plt.title('Average Strength = {:.5f}'.format(avgstr),fontdict={'fontsize': 25,'fontweight': 'bold'}) 
 	plt.text(128, 245, render_names_temp[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
 	plt.savefig('{}/{:>2d}_'.format(sf3, k) + render_names_temp[k] + '.jpg')
@@ -1304,7 +1088,7 @@ print(maxi)
 # Rendering the object rotation results
 h = w = 256
 obj_render_str = []
-sf4 = 'results/final_results/object_angles'
+sf4 = 'results/final_results/object_angles_2'
 if not os.path.exists(sf4):
     os.mkdir(sf4)
 maxi = 0
@@ -1329,7 +1113,7 @@ print(maxi)
 # Rendering the melanin variation results
 h = w = 256
 mel_render_str = []
-sf5 = 'results/final_results/artificial_melanin_variation'
+sf5 = 'results/final_results/artificial_melanin_variation_2'
 if not os.path.exists(sf5):
     os.mkdir(sf5)
 maxi = 0
@@ -1354,7 +1138,7 @@ print(maxi)
 
 h = w = 256
 chan_render_str = []
-sf6 = 'results/final_results/channel_variation'
+sf6 = 'results/final_results/channel_variation_2'
 if not os.path.exists(sf6):
     os.mkdir(sf6)
 maxi = 0
@@ -1369,7 +1153,7 @@ for k in range(len(chan_strs)):
 	plt.imshow(img)
 	#plt.colorbar()
 	plt.set_cmap('inferno')
-	plt.clim(0,0.1)
+	plt.clim(0,0.00005)
 	plt.title('Average Strength = {:.5f}'.format(avgstr),fontdict={'fontsize': 25,'fontweight': 'bold'}) 
 	plt.text(128, 245, render_names_chan[k], verticalalignment='bottom', horizontalalignment='center', color='white', fontweight='bold', fontsize=25)
 	plt.savefig('{}/{:>2d}_'.format(sf6, k) + render_names_chan[k] + '.jpg')
@@ -1404,7 +1188,7 @@ plot_x_x = np.array(range(-400,401,100))
 plot_x_y = light_render_str[0:9]
 plot_y_x = np.array(range(-400,401,100))
 plot_y_y = light_render_str[9:18]
-plot_z_x = np.array(range(300,1001,100))
+plot_z_x = np.array(range(100,801,100))
 plot_z_y = light_render_str[18:26]
 plt.plot(plot_x_x, plot_x_y)
 plt.grid(True)
@@ -1441,9 +1225,9 @@ plt.grid(True)
 
 #6 - Color channel variation
 plot_x_x = np.array(np.arange(low,(high+inc),inc))*max_val
-plot_x_y = chan_render_str[0:11]
-plot_y_y = chan_render_str[11:22]
-plot_z_y = chan_render_str[22:33]
+plot_x_y = chan_render_str[0:21]
+plot_y_y = chan_render_str[21:42]
+plot_z_y = chan_render_str[42:63]
 
 plt.plot(plot_x_x, plot_x_y, 'r')
 plt.plot(plot_x_x, plot_y_y, 'g')
